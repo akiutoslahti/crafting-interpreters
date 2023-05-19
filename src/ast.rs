@@ -2,7 +2,7 @@
 
 use std::fmt::Display;
 
-enum Expr {
+pub enum Expr {
     Literal(Literal),
     Unary {
         op: UnaryOp,
@@ -27,7 +27,7 @@ impl Display for Expr {
     }
 }
 
-enum Literal {
+pub enum Literal {
     Number(f64),
     String(String),
     True,
@@ -45,7 +45,8 @@ impl Display for Literal {
     }
 }
 
-enum UnaryOp {
+#[derive(Copy, Clone)]
+pub enum UnaryOp {
     Negate,
     Not,
 }
@@ -59,7 +60,8 @@ impl Display for UnaryOp {
     }
 }
 
-enum BinaryOp {
+#[derive(Copy, Clone)]
+pub enum BinaryOp {
     Equal,
     NotEqual,
     Less,

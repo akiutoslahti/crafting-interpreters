@@ -1,7 +1,7 @@
 use lazy_static::lazy_static;
 use std::{collections::HashMap, fmt::Display};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum ScanningError {
     UnexpectedChar(char, String),
     UnterminatedString(String),
@@ -9,6 +9,7 @@ pub enum ScanningError {
 
 impl Display for ScanningError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        const PREFIX: &str = "Scanning error!";
         const PADDING: usize = 4;
         let pad_msg = |msg: &str| -> String {
             msg.lines()
@@ -20,24 +21,21 @@ impl Display for ScanningError {
             ScanningError::UnexpectedChar(c, msg) => {
                 write!(
                     f,
-                    "Scanning error: unexpected char \'{}\'.\n\n{}",
+                    "{} Unexpected character \'{}\'.\n\n{}",
+                    PREFIX,
                     c,
                     pad_msg(msg)
                 )
             }
             ScanningError::UnterminatedString(msg) => {
-                write!(
-                    f,
-                    "Scanning error: unterminated string.\n\n{}",
-                    pad_msg(msg)
-                )
+                write!(f, "{} Unterminated string.\n\n{}", PREFIX, pad_msg(msg))
             }
         }
     }
 }
 
-#[derive(Debug, Clone)]
-enum TokenType {
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum TokenType {
     // Single-character tokens
     LeftParen,
     RightParen,
@@ -111,24 +109,29 @@ lazy_static! {
 }
 
 #[derive(Debug, Clone)]
-enum LiteralType {
+pub enum LiteralType {
     Identifier(String),
     String(String),
     Number(f64),
 }
 
 #[derive(Clone)]
-struct Token {
-    token: TokenType,
-    lexeme: String,
-    offset: usize,
-    literal: Option<LiteralType>,
+pub struct Token {
+    pub tokentype: TokenType,
+    pub lexeme: String,
+    pub offset: usize,
+    pub literal: Option<LiteralType>,
 }
 
 impl Token {
-    fn new(token: TokenType, lexeme: String, offset: usize, literal: Option<LiteralType>) -> Self {
+    fn new(
+        tokentype: TokenType,
+        lexeme: String,
+        offset: usize,
+        literal: Option<LiteralType>,
+    ) -> Self {
         Self {
-            token,
+            tokentype,
             lexeme,
             offset,
             literal,
@@ -141,13 +144,12 @@ impl Display for Token {
         write!(
             f,
             "[{:?}, {:?}, {}, {:?}]",
-            self.token, self.lexeme, self.offset, self.literal
+            self.tokentype, self.lexeme, self.offset, self.literal
         )
     }
 }
 
-#[derive(Clone)]
-pub struct Tokens(Vec<Token>);
+pub struct Tokens(pub Vec<Token>);
 
 impl Display for Tokens {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -219,7 +221,7 @@ impl<'a> Scanner<'a> {
         c
     }
 
-    fn peek(&mut self) -> Option<char> {
+    fn peek(&self) -> Option<char> {
         if self.eof() {
             None
         } else {
@@ -227,14 +229,14 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    fn peek_expect(&mut self, expected: char) -> bool {
+    fn peek_expect(&self, expected: char) -> bool {
         match self.peek() {
             Some(c) => c == expected,
             None => false,
         }
     }
 
-    fn peek_next(&mut self) -> Option<char> {
+    fn peek_next(&self) -> Option<char> {
         if self.current + 1 >= self.source.len() {
             None
         } else {
@@ -242,22 +244,23 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    fn add_token(&mut self, token: TokenType, literal: Option<LiteralType>) {
-        let lexeme = match token {
+    fn add_token(&mut self, tokentype: TokenType, literal: Option<LiteralType>) {
+        let lexeme = match tokentype {
             TokenType::Eof => "",
             _ => &self.source[self.start..self.current],
         }
         .to_owned();
-        let offset = match token {
+        let offset = match tokentype {
             TokenType::Eof => self.source.len(),
             _ => self.start,
         };
 
-        self.tokens.push(Token::new(token, lexeme, offset, literal));
+        self.tokens
+            .push(Token::new(tokentype, lexeme, offset, literal));
     }
 
-    fn add_token_basic(&mut self, token: TokenType) {
-        self.add_token(token, None);
+    fn add_token_basic(&mut self, tokentype: TokenType) {
+        self.add_token(tokentype, None);
     }
 
     fn add_token_string(&mut self) {
@@ -335,7 +338,7 @@ impl<'a> Scanner<'a> {
         }
 
         match KEYWORDS.get(&self.source[self.start..self.current]) {
-            Some(token) => self.add_token_basic(token.clone()),
+            Some(token) => self.add_token_basic(*token),
             None => self.add_token_identifier(),
         }
     }
@@ -407,18 +410,24 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    pub fn scan_tokens(&mut self) -> Result<Tokens, Vec<ScanningError>> {
+    pub fn scan_tokens(&mut self) {
         while !self.eof() {
             self.start = self.current;
             self.scan_token();
         }
 
         self.add_token_basic(TokenType::Eof);
+    }
+}
 
-        if !self.errors.is_empty() {
-            Err(self.errors.clone())
-        } else {
-            Ok(Tokens(self.tokens.clone()))
-        }
+pub fn scan_tokens(source: &str) -> Result<Tokens, Vec<ScanningError>> {
+    let mut scanner = Scanner::new(source);
+
+    scanner.scan_tokens();
+
+    if !scanner.errors.is_empty() {
+        Err(scanner.errors)
+    } else {
+        Ok(Tokens(scanner.tokens))
     }
 }

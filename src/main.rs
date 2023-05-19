@@ -2,6 +2,7 @@ use clap::{Parser, ValueEnum};
 
 mod ast;
 mod bytecode;
+mod parser;
 mod scanner;
 mod treewalk;
 

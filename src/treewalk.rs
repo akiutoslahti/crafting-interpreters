@@ -1,4 +1,4 @@
-use crate::scanner::Scanner;
+use crate::{parser::parse, scanner::scan_tokens};
 use std::{
     fs,
     io::{self, Write},
@@ -6,10 +6,12 @@ use std::{
 };
 
 fn run(source: &str) {
-    let mut scanner = Scanner::new(source);
-    match scanner.scan_tokens() {
-        Ok(tokens) => println!("{}", tokens),
-        Err(errors) => errors.iter().for_each(|e| println!("{}", e)),
+    match scan_tokens(source) {
+        Ok(tokens) => match parse(source, tokens) {
+            Ok(expr) => println!("{}", expr),
+            Err(error) => eprintln!("{}", error),
+        },
+        Err(errors) => errors.iter().for_each(|e| eprintln!("{}", e)),
     }
 }
 
