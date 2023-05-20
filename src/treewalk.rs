@@ -1,4 +1,4 @@
-use crate::{parser::parse, scanner::scan_tokens};
+use crate::{interpreter::interpret, parser::parse, scanner::scan_tokens};
 use std::{
     fs,
     io::{self, Write},
@@ -7,10 +7,19 @@ use std::{
 
 fn run(source: &str) {
     match scan_tokens(source) {
-        Ok(tokens) => match parse(source, tokens) {
-            Ok(expr) => println!("{}", expr),
-            Err(error) => eprintln!("{}", error),
-        },
+        Ok(tokens) => {
+            // println!("{}", tokens);
+            match parse(source, tokens) {
+                Ok(expr) => {
+                    // println!("{}", expr);
+                    match interpret(source, expr) {
+                        Ok(val) => println!("{}", val),
+                        Err(error) => eprintln!("{}", error),
+                    }
+                }
+                Err(error) => eprintln!("{}", error),
+            }
+        }
         Err(errors) => errors.iter().for_each(|e| eprintln!("{}", e)),
     }
 }

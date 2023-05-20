@@ -143,7 +143,7 @@ impl Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "[{:?}, {:?}, {}, {:?}]",
+            "[{:?}, \"{}\", {}, {:?}]",
             self.tokentype, self.lexeme, self.offset, self.literal
         )
     }
@@ -229,10 +229,13 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    fn peek_expect(&self, expected: char) -> bool {
+    fn peek_expect(&mut self, expected: char) -> bool {
         match self.peek() {
-            Some(c) => c == expected,
-            None => false,
+            Some(c) if c == expected => {
+                self.advance();
+                true
+            }
+            _ => false,
         }
     }
 

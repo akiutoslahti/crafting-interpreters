@@ -20,8 +20,8 @@ impl Display for Expr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Expr::Literal(l) => write!(f, "{}", l),
-            Expr::Unary { op, rhs } => write!(f, "({} {})", op, rhs),
-            Expr::Binary { lhs, op, rhs } => write!(f, "({} {} {})", op, lhs, rhs),
+            Expr::Unary { op, rhs } => write!(f, "({} {})", op.optype, rhs),
+            Expr::Binary { lhs, op, rhs } => write!(f, "({} {} {})", op.optype, lhs, rhs),
             Expr::Grouping(expr) => write!(f, "(group {})", expr),
         }
     }
@@ -39,29 +39,42 @@ impl Display for Literal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Literal::Number(n) => write!(f, "{}", n),
-            Literal::String(s) => write!(f, "{}", s),
-            _ => todo!(),
+            Literal::String(s) => write!(f, "\"{}\"", s),
+            Literal::True => write!(f, "true"),
+            Literal::False => write!(f, "false"),
+            Literal::Nil => write!(f, "nil"),
         }
     }
 }
 
 #[derive(Copy, Clone)]
-pub enum UnaryOp {
+pub enum UnaryOpType {
     Negate,
     Not,
 }
 
-impl Display for UnaryOp {
+impl Display for UnaryOpType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            UnaryOp::Negate => write!(f, "-"),
-            UnaryOp::Not => write!(f, "!"),
+            UnaryOpType::Negate => write!(f, "-"),
+            UnaryOpType::Not => write!(f, "!"),
         }
     }
 }
 
+pub struct UnaryOp {
+    pub optype: UnaryOpType,
+    pub offset: usize,
+}
+
+impl UnaryOp {
+    pub fn new(optype: UnaryOpType, offset: usize) -> Self {
+        Self { optype, offset }
+    }
+}
+
 #[derive(Copy, Clone)]
-pub enum BinaryOp {
+pub enum BinaryOpType {
     Equal,
     NotEqual,
     Less,
@@ -74,38 +87,51 @@ pub enum BinaryOp {
     Div,
 }
 
-impl Display for BinaryOp {
+impl Display for BinaryOpType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            BinaryOp::Equal => write!(f, "="),
-            BinaryOp::NotEqual => write!(f, "!="),
-            BinaryOp::Less => write!(f, "<"),
-            BinaryOp::LessEqual => write!(f, "="),
-            BinaryOp::Greater => write!(f, ">"),
-            BinaryOp::GreaterEqual => write!(f, ">="),
-            BinaryOp::Add => write!(f, "+"),
-            BinaryOp::Sub => write!(f, "-"),
-            BinaryOp::Mul => write!(f, "*"),
-            BinaryOp::Div => write!(f, "/"),
+            BinaryOpType::Equal => write!(f, "=="),
+            BinaryOpType::NotEqual => write!(f, "!="),
+            BinaryOpType::Less => write!(f, "<"),
+            BinaryOpType::LessEqual => write!(f, "<="),
+            BinaryOpType::Greater => write!(f, ">"),
+            BinaryOpType::GreaterEqual => write!(f, ">="),
+            BinaryOpType::Add => write!(f, "+"),
+            BinaryOpType::Sub => write!(f, "-"),
+            BinaryOpType::Mul => write!(f, "*"),
+            BinaryOpType::Div => write!(f, "/"),
         }
+    }
+}
+
+pub struct BinaryOp {
+    pub optype: BinaryOpType,
+    pub offset: usize,
+}
+
+impl BinaryOp {
+    pub fn new(optype: BinaryOpType, offset: usize) -> Self {
+        Self { optype, offset }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::ast::BinaryOp;
+    use crate::ast::BinaryOpType;
     use crate::ast::Expr;
     use crate::ast::Literal;
     use crate::ast::UnaryOp;
+    use crate::ast::UnaryOpType;
 
     #[test]
     fn check_astprinter_example() {
         let expr = Expr::Binary {
             lhs: Box::new(Expr::Unary {
-                op: UnaryOp::Negate,
+                op: UnaryOp::new(UnaryOpType::Negate, 0),
                 rhs: Box::new(Expr::Literal(Literal::Number(123.0))),
             }),
-            op: BinaryOp::Mul,
+            op: BinaryOp::new(BinaryOpType::Mul, 0),
             rhs: Box::new(Expr::Grouping(Box::new(Expr::Literal(Literal::Number(
                 45.67,
             ))))),

@@ -1,29 +1,29 @@
 use crate::{
-    ast::{BinaryOp, Expr, Literal, UnaryOp},
+    ast::{BinaryOp, BinaryOpType, Expr, Literal, UnaryOp, UnaryOpType},
     scanner::{LiteralType, Token, TokenType, Tokens},
 };
 use lazy_static::lazy_static;
 use std::{collections::HashMap, fmt::Display};
 
 lazy_static! {
-    static ref BINARYOPS: HashMap<TokenType, BinaryOp> = {
+    static ref BINARYOPS: HashMap<TokenType, BinaryOpType> = {
         let mut ops = HashMap::new();
-        ops.insert(TokenType::EqualEqual, BinaryOp::Equal);
-        ops.insert(TokenType::BangEqual, BinaryOp::NotEqual);
-        ops.insert(TokenType::Less, BinaryOp::Less);
-        ops.insert(TokenType::LessEqual, BinaryOp::LessEqual);
-        ops.insert(TokenType::Greater, BinaryOp::Greater);
-        ops.insert(TokenType::GreaterEqual, BinaryOp::GreaterEqual);
-        ops.insert(TokenType::Plus, BinaryOp::Add);
-        ops.insert(TokenType::Minus, BinaryOp::Sub);
-        ops.insert(TokenType::Star, BinaryOp::Mul);
-        ops.insert(TokenType::Slash, BinaryOp::Div);
+        ops.insert(TokenType::EqualEqual, BinaryOpType::Equal);
+        ops.insert(TokenType::BangEqual, BinaryOpType::NotEqual);
+        ops.insert(TokenType::Less, BinaryOpType::Less);
+        ops.insert(TokenType::LessEqual, BinaryOpType::LessEqual);
+        ops.insert(TokenType::Greater, BinaryOpType::Greater);
+        ops.insert(TokenType::GreaterEqual, BinaryOpType::GreaterEqual);
+        ops.insert(TokenType::Plus, BinaryOpType::Add);
+        ops.insert(TokenType::Minus, BinaryOpType::Sub);
+        ops.insert(TokenType::Star, BinaryOpType::Mul);
+        ops.insert(TokenType::Slash, BinaryOpType::Div);
         ops
     };
-    static ref UNARYOPS: HashMap<TokenType, UnaryOp> = {
+    static ref UNARYOPS: HashMap<TokenType, UnaryOpType> = {
         let mut ops = HashMap::new();
-        ops.insert(TokenType::Minus, UnaryOp::Negate);
-        ops.insert(TokenType::Bang, UnaryOp::Not);
+        ops.insert(TokenType::Minus, UnaryOpType::Negate);
+        ops.insert(TokenType::Bang, UnaryOpType::Not);
         ops
     };
 }
@@ -47,7 +47,7 @@ impl Display for ParsingError {
             ParsingError::MissingExpression(token, msg) => {
                 write!(
                     f,
-                    "{} Expected expression, got token: {:?} ({:?})\n\n{}",
+                    "{} Expected expression, got token: {:?} ({:?}).\n\n{}",
                     PREFIX,
                     token.tokentype,
                     token.lexeme,
@@ -57,7 +57,7 @@ impl Display for ParsingError {
             ParsingError::UnmetExpectation(token, expected, msg) => {
                 write!(
                     f,
-                    "{} Expected token: {:?}, got token: {:?}\n\n{}",
+                    "{} Expected token: {:?}, got token: {:?}.\n\n{}",
                     PREFIX,
                     expected,
                     token.tokentype,
@@ -296,7 +296,7 @@ pub fn parse(source: &str, tokens: Tokens) -> Result<Expr, ParsingError> {
 
 fn token_to_binaryop(token: &Token) -> BinaryOp {
     match BINARYOPS.get(&token.tokentype) {
-        Some(op) => *op,
+        Some(op) => BinaryOp::new(*op, token.offset),
         None => panic!(
             "Invalid tokentype ({:?}) for binary operation",
             token.tokentype
@@ -306,7 +306,7 @@ fn token_to_binaryop(token: &Token) -> BinaryOp {
 
 fn token_to_unaryop(token: &Token) -> UnaryOp {
     match UNARYOPS.get(&token.tokentype) {
-        Some(op) => *op,
+        Some(op) => UnaryOp::new(*op, token.offset),
         None => panic!(
             "Invalid tokentype ({:?}) for unary operation",
             token.tokentype
