@@ -1,10 +1,19 @@
-use crate::ast::{BinaryOp, BinaryOpType, Expr, Literal, UnaryOp, UnaryOpType};
-use std::{f64::EPSILON, fmt::Display};
+use crate::ast::{BinaryOp, BinaryOpType, Expr, Literal, Stmt, UnaryOp, UnaryOpType};
+use std::{
+    cell::RefCell,
+    collections::{hash_map::Entry, HashMap},
+    f64::EPSILON,
+    fmt::Display,
+    rc::Rc,
+};
 
 pub enum InterpreterError {
     InvalidUnaryOperand(UnaryOpType, Value, String),
     InvalidBinaryOperands(BinaryOpType, Value, Value, String),
+    // TODO Add location msg?
     DivisionByZero(String),
+    // TODO Add location msg?
+    UndefinedVariable(String),
 }
 
 impl Display for InterpreterError {
@@ -37,6 +46,9 @@ impl Display for InterpreterError {
             InterpreterError::DivisionByZero(msg) => {
                 write!(f, "{} Division by zero.\n\n{}", PREFIX, pad_msg(msg))
             }
+            InterpreterError::UndefinedVariable(name) => {
+                write!(f, "Undefined variable \"{}\".", name)
+            }
         }
     }
 }
@@ -60,13 +72,65 @@ impl Display for Value {
         }
     }
 }
-struct Interpreter<'a> {
+
+struct Environment {
+    enclosing: Option<Rc<RefCell<Environment>>>,
+    values: HashMap<String, Value>,
+}
+
+impl Environment {
+    fn new() -> Self {
+        Self {
+            enclosing: None,
+            values: HashMap::new(),
+        }
+    }
+
+    fn new_with_enclosing(enclosing: Rc<RefCell<Environment>>) -> Self {
+        Self {
+            enclosing: Some(enclosing),
+            values: HashMap::new(),
+        }
+    }
+
+    fn define(&mut self, name: String, val: Value) {
+        self.values.insert(name, val);
+    }
+
+    fn get(&self, name: &String) -> Result<Value, InterpreterError> {
+        match self.values.get(name) {
+            Some(val) => Ok(val.clone()),
+            None => match &self.enclosing {
+                Some(enclosing) => enclosing.borrow().get(name),
+                None => Err(InterpreterError::UndefinedVariable(name.clone())),
+            },
+        }
+    }
+
+    fn assign(&mut self, name: String, val: Value) -> Result<(), InterpreterError> {
+        if let Entry::Occupied(mut e) = self.values.entry(name.clone()) {
+            e.insert(val);
+            Ok(())
+        } else {
+            match &self.enclosing {
+                Some(enclosing) => enclosing.borrow_mut().assign(name, val),
+                None => Err(InterpreterError::UndefinedVariable(name)),
+            }
+        }
+    }
+}
+
+pub struct Interpreter<'a> {
     source: &'a str,
+    environment: Rc<RefCell<Environment>>,
 }
 
 impl<'a> Interpreter<'a> {
-    fn new(source: &'a str) -> Self {
-        Self { source }
+    pub fn new(source: &'a str) -> Self {
+        Self {
+            source,
+            environment: Rc::new(RefCell::new(Environment::new())),
+        }
     }
 
     fn error_msg(&self, offset: usize) -> String {
@@ -90,26 +154,34 @@ impl<'a> Interpreter<'a> {
         format!("{}{}\n{}", lineprefix, line, indicator)
     }
 
-    fn expression(&self, expr: Expr) -> Result<Value, InterpreterError> {
+    fn expression(&mut self, expr: &Expr) -> Result<Value, InterpreterError> {
         match expr {
             Expr::Literal(l) => Ok(self.literal(l)),
-            Expr::Unary { op, rhs } => self.unary(op, *rhs),
-            Expr::Binary { lhs, op, rhs } => self.binary(*lhs, op, *rhs),
-            Expr::Grouping(expr) => self.expression(*expr),
+            Expr::Unary { op, rhs } => self.unary(op, rhs),
+            Expr::Binary { lhs, op, rhs } => self.binary(lhs, op, rhs),
+            Expr::Grouping(expr) => self.expression(expr),
+            Expr::Variable { name, offset: _ } => self.environment.borrow().get(name),
+            Expr::Assign { name, value } => {
+                let value = self.evaluate(value)?;
+                self.environment
+                    .borrow_mut()
+                    .assign(name.clone(), value.clone())?;
+                Ok(value)
+            }
         }
     }
 
-    fn literal(&self, literal: Literal) -> Value {
+    fn literal(&self, literal: &Literal) -> Value {
         match literal {
-            Literal::Number(n) => Value::Number(n),
-            Literal::String(s) => Value::String(s),
+            Literal::Number(n) => Value::Number(*n),
+            Literal::String(s) => Value::String(s.clone()),
             Literal::False => Value::Bool(false),
             Literal::True => Value::Bool(true),
             Literal::Nil => Value::Nil,
         }
     }
 
-    fn unary(&self, op: UnaryOp, rhs: Expr) -> Result<Value, InterpreterError> {
+    fn unary(&mut self, op: &UnaryOp, rhs: &Expr) -> Result<Value, InterpreterError> {
         let rhs = self.expression(rhs)?;
 
         match (op.optype, rhs.clone()) {
@@ -123,7 +195,7 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn binary(&self, lhs: Expr, op: BinaryOp, rhs: Expr) -> Result<Value, InterpreterError> {
+    fn binary(&mut self, lhs: &Expr, op: &BinaryOp, rhs: &Expr) -> Result<Value, InterpreterError> {
         let lhs = self.expression(lhs)?;
         let rhs = self.expression(rhs)?;
 
@@ -157,14 +229,58 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    pub fn interpret(&self, expr: Expr) -> Result<Value, InterpreterError> {
+    fn evaluate(&mut self, expr: &Expr) -> Result<Value, InterpreterError> {
         self.expression(expr)
     }
-}
 
-pub fn interpret(source: &str, expr: Expr) -> Result<Value, InterpreterError> {
-    let interpreter = Interpreter::new(source);
-    interpreter.interpret(expr)
+    fn execute_block(&mut self, statements: &[Stmt]) -> Result<(), InterpreterError> {
+        let previous = self.environment.clone();
+        self.environment = Rc::new(RefCell::new(Environment::new_with_enclosing(
+            self.environment.clone(),
+        )));
+
+        let mut err = Ok(());
+        for statement in statements {
+            err = self.execute(statement);
+            if err.is_err() {
+                break;
+            }
+        }
+
+        self.environment = previous;
+
+        err
+    }
+
+    fn execute(&mut self, stmt: &Stmt) -> Result<(), InterpreterError> {
+        match stmt {
+            Stmt::Expression(expr) => {
+                self.evaluate(expr)?;
+            }
+            Stmt::Print(expr) => {
+                let val = self.evaluate(expr)?;
+                println!("{}", val);
+            }
+            Stmt::Var { name, initializer } => {
+                let mut val = Value::Nil;
+                if let Some(expr) = initializer {
+                    val = self.evaluate(expr)?;
+                }
+                self.environment.borrow_mut().define(name.clone(), val);
+            }
+            Stmt::Block(statements) => self.execute_block(statements)?,
+        }
+
+        Ok(())
+    }
+
+    pub fn interpret(&mut self, statements: Vec<Stmt>) -> Result<(), InterpreterError> {
+        for stmt in &statements {
+            self.execute(stmt)?;
+        }
+
+        Ok(())
+    }
 }
 
 fn is_truthy(val: Value) -> bool {

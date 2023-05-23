@@ -1,5 +1,5 @@
 use crate::{
-    ast::{BinaryOp, BinaryOpType, Expr, Literal, UnaryOp, UnaryOpType},
+    ast::{BinaryOp, BinaryOpType, Expr, Literal, Stmt, UnaryOp, UnaryOpType},
     scanner::{LiteralType, Token, TokenType, Tokens},
 };
 use lazy_static::lazy_static;
@@ -32,6 +32,7 @@ lazy_static! {
 pub enum ParsingError {
     MissingExpression(Token, String),
     UnmetExpectation(Token, TokenType, String),
+    InvalidAssignmentTarget(String),
 }
 
 impl Display for ParsingError {
@@ -64,18 +65,26 @@ impl Display for ParsingError {
                     pad_msg(msg)
                 )
             }
+            ParsingError::InvalidAssignmentTarget(msg) => {
+                write!(
+                    f,
+                    "{} Invalid assignment target.\n\n{}",
+                    PREFIX,
+                    pad_msg(msg)
+                )
+            }
         }
     }
 }
 
-struct Parser<'a> {
+pub struct Parser<'a> {
     source: &'a str,
     tokens: Vec<Token>,
     current: usize,
 }
 
 impl<'a> Parser<'a> {
-    fn new(source: &'a str, tokens: Tokens) -> Self {
+    pub fn new(source: &'a str, tokens: Tokens) -> Self {
         Self {
             source,
             tokens: tokens.0,
@@ -189,7 +198,29 @@ impl<'a> Parser<'a> {
     }
 
     fn expression(&mut self) -> Result<Expr, ParsingError> {
-        self.equality()
+        self.assignment()
+    }
+
+    fn assignment(&mut self) -> Result<Expr, ParsingError> {
+        let expr = self.equality()?;
+
+        if self.match_next(vec![TokenType::Equal]) {
+            let token = self.previous().clone();
+            let value = self.assignment()?;
+
+            if let Expr::Variable { name, offset: _ } = expr {
+                return Ok(Expr::Assign {
+                    name,
+                    value: Box::new(value),
+                });
+            } else {
+                return Err(ParsingError::InvalidAssignmentTarget(
+                    self.error_msg(&token),
+                ));
+            }
+        }
+
+        Ok(expr)
     }
 
     fn equality(&mut self) -> Result<Expr, ParsingError> {
@@ -271,6 +302,26 @@ impl<'a> Parser<'a> {
             return Ok(Expr::Literal(literal));
         }
 
+        if self.match_next(vec![TokenType::Identifier]) {
+            let token = self.previous();
+
+            let name;
+            if let Some(LiteralType::Identifier(s)) = &token.literal {
+                name = s.clone();
+            } else {
+                return Err(ParsingError::UnmetExpectation(
+                    token.clone(),
+                    TokenType::Identifier,
+                    self.error_msg(token),
+                ));
+            }
+
+            return Ok(Expr::Variable {
+                name,
+                offset: token.offset,
+            });
+        }
+
         if self.match_next(vec![TokenType::LeftParen]) {
             let expr = self.expression()?;
             self.consume(TokenType::RightParen)?;
@@ -284,14 +335,93 @@ impl<'a> Parser<'a> {
         ))
     }
 
-    pub fn parse(&mut self) -> Result<Expr, ParsingError> {
-        self.expression()
+    fn expression_statement(&mut self) -> Result<Stmt, ParsingError> {
+        let expr = self.expression()?;
+        self.consume(TokenType::Semicolon)?;
+        Ok(Stmt::Expression(expr))
     }
-}
 
-pub fn parse(source: &str, tokens: Tokens) -> Result<Expr, ParsingError> {
-    let mut parser = Parser::new(source, tokens);
-    parser.parse()
+    fn print_statement(&mut self) -> Result<Stmt, ParsingError> {
+        let expr = self.expression()?;
+        self.consume(TokenType::Semicolon)?;
+        Ok(Stmt::Print(expr))
+    }
+
+    fn block_statement(&mut self) -> Result<Stmt, ParsingError> {
+        let mut statements: Vec<Stmt> = vec![];
+
+        while !self.check(TokenType::RightBrace) {
+            statements.push(self.declaration()?);
+        }
+
+        self.consume(TokenType::RightBrace)?;
+
+        Ok(Stmt::Block(statements))
+    }
+
+    fn statement(&mut self) -> Result<Stmt, ParsingError> {
+        if self.match_next(vec![TokenType::LeftBrace]) {
+            return self.block_statement();
+        }
+        if self.match_next(vec![TokenType::Print]) {
+            return self.print_statement();
+        }
+
+        self.expression_statement()
+    }
+
+    fn var_declaration(&mut self) -> Result<Stmt, ParsingError> {
+        let name = if let Some(LiteralType::Identifier(s)) =
+            &self.consume(TokenType::Identifier)?.literal
+        {
+            s.clone()
+        } else {
+            // TODO Add panic message
+            panic!("");
+        };
+
+        let initializer = if self.match_next(vec![TokenType::Equal]) {
+            Some(self.expression()?)
+        } else {
+            None
+        };
+
+        self.consume(TokenType::Semicolon)?;
+
+        Ok(Stmt::Var { name, initializer })
+    }
+
+    fn declaration(&mut self) -> Result<Stmt, ParsingError> {
+        let stmt = if self.match_next(vec![TokenType::Var]) {
+            self.var_declaration()
+        } else {
+            self.statement()
+        };
+
+        if stmt.is_err() {
+            self.synchronize();
+        }
+
+        stmt
+    }
+
+    pub fn parse(&mut self) -> Result<Vec<Stmt>, Vec<ParsingError>> {
+        let mut statements = vec![];
+        let mut errors = vec![];
+
+        while !self.eof() {
+            match self.declaration() {
+                Ok(stmt) => statements.push(stmt),
+                Err(err) => errors.push(err),
+            }
+        }
+
+        if !errors.is_empty() {
+            Err(errors)
+        } else {
+            Ok(statements)
+        }
+    }
 }
 
 fn token_to_binaryop(token: &Token) -> BinaryOp {

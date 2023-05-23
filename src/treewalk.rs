@@ -1,23 +1,25 @@
-use crate::{interpreter::interpret, parser::parse, scanner::scan_tokens};
+use crate::{interpreter::Interpreter, parser::Parser, scanner::scan_tokens};
 use std::{
     fs,
     io::{self, Write},
     path::Path,
 };
 
+// TODO Create scanner, parser and interpreter outside run() function to keep state and fix REPL
 fn run(source: &str) {
     match scan_tokens(source) {
         Ok(tokens) => {
             // println!("{}", tokens);
-            match parse(source, tokens) {
-                Ok(expr) => {
-                    // println!("{}", expr);
-                    match interpret(source, expr) {
-                        Ok(val) => println!("{}", val),
-                        Err(error) => eprintln!("{}", error),
+            let mut parser = Parser::new(source, tokens);
+            match parser.parse() {
+                Ok(statements) => {
+                    // statements.iter().for_each(|stmt| println!("{}", stmt));
+                    let mut interpreter = Interpreter::new(source);
+                    if let Err(err) = interpreter.interpret(statements) {
+                        eprintln!("{}", err);
                     }
                 }
-                Err(error) => eprintln!("{}", error),
+                Err(errors) => errors.iter().for_each(|e| eprintln!("{}", e)),
             }
         }
         Err(errors) => errors.iter().for_each(|e| eprintln!("{}", e)),

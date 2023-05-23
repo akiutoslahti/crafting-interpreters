@@ -14,6 +14,14 @@ pub enum Expr {
         rhs: Box<Expr>,
     },
     Grouping(Box<Expr>),
+    Variable {
+        name: String,
+        offset: usize,
+    },
+    Assign {
+        name: String,
+        value: Box<Expr>,
+    },
 }
 
 impl Display for Expr {
@@ -23,6 +31,8 @@ impl Display for Expr {
             Expr::Unary { op, rhs } => write!(f, "({} {})", op.optype, rhs),
             Expr::Binary { lhs, op, rhs } => write!(f, "({} {} {})", op.optype, lhs, rhs),
             Expr::Grouping(expr) => write!(f, "(group {})", expr),
+            Expr::Variable { name, offset: _ } => write!(f, "{}", name),
+            Expr::Assign { name, value } => write!(f, "{} = {}", name, value),
         }
     }
 }
@@ -137,5 +147,30 @@ mod tests {
             ))))),
         };
         assert_eq!(format!("{}", expr), "(* (- 123) (group 45.67))");
+    }
+}
+
+pub enum Stmt {
+    Expression(Expr),
+    Print(Expr),
+    Var {
+        name: String,
+        initializer: Option<Expr>,
+    },
+    Block(Vec<Stmt>),
+}
+
+impl Display for Stmt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Stmt::Expression(expr) => write!(f, "{}", expr),
+            Stmt::Print(expr) => write!(f, "(print {})", expr),
+            Stmt::Var { name, initializer } => match initializer {
+                Some(expr) => write!(f, "var {} = {}", name, expr),
+                None => write!(f, "var {}", name),
+            },
+            // TODO Print properly
+            Stmt::Block(_statements) => todo!(),
+        }
     }
 }
