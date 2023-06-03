@@ -10,10 +10,8 @@ use std::{
 pub enum InterpreterError {
     InvalidUnaryOperand(UnaryOpType, Value, String),
     InvalidBinaryOperands(BinaryOpType, Value, Value, String),
-    // TODO Add location msg?
     DivisionByZero(String),
-    // TODO Add location msg?
-    UndefinedVariable(String),
+    UnknownVariable(String, String),
 }
 
 impl Display for InterpreterError {
@@ -28,7 +26,7 @@ impl Display for InterpreterError {
         match self {
             InterpreterError::InvalidUnaryOperand(op, rhs, msg) => write!(
                 f,
-                "{} Invalid operand ({}) for unary expression ({}).\n\n{}",
+                "{} Invalid operand ({}) for unary expression ({:?}).\n\n{}",
                 PREFIX,
                 rhs,
                 op,
@@ -36,7 +34,7 @@ impl Display for InterpreterError {
             ),
             InterpreterError::InvalidBinaryOperands(op, lhs, rhs, msg) => write!(
                 f,
-                "{} Invalid operands ({}, {}) for binary expression ({}).\n\n{}",
+                "{} Invalid operands ({}, {}) for binary expression ({:?}).\n\n{}",
                 PREFIX,
                 lhs,
                 rhs,
@@ -46,8 +44,14 @@ impl Display for InterpreterError {
             InterpreterError::DivisionByZero(msg) => {
                 write!(f, "{} Division by zero.\n\n{}", PREFIX, pad_msg(msg))
             }
-            InterpreterError::UndefinedVariable(name) => {
-                write!(f, "Undefined variable \"{}\".", name)
+            InterpreterError::UnknownVariable(name, msg) => {
+                write!(
+                    f,
+                    "{} Unknown variable \"{}\".\n\n{}",
+                    PREFIX,
+                    name,
+                    pad_msg(msg)
+                )
             }
         }
     }
@@ -97,24 +101,24 @@ impl Environment {
         self.values.insert(name, val);
     }
 
-    fn get(&self, name: &String) -> Result<Value, InterpreterError> {
+    fn get(&self, name: &String) -> Option<Value> {
         match self.values.get(name) {
-            Some(val) => Ok(val.clone()),
+            Some(val) => Some(val.clone()),
             None => match &self.enclosing {
                 Some(enclosing) => enclosing.borrow().get(name),
-                None => Err(InterpreterError::UndefinedVariable(name.clone())),
+                None => None,
             },
         }
     }
 
-    fn assign(&mut self, name: String, val: Value) -> Result<(), InterpreterError> {
+    fn assign(&mut self, name: String, val: Value) -> Result<(), ()> {
         if let Entry::Occupied(mut e) = self.values.entry(name.clone()) {
             e.insert(val);
             Ok(())
         } else {
             match &self.enclosing {
                 Some(enclosing) => enclosing.borrow_mut().assign(name, val),
-                None => Err(InterpreterError::UndefinedVariable(name)),
+                None => Err(()),
             }
         }
     }
@@ -158,15 +162,32 @@ impl<'a> Interpreter<'a> {
         match expr {
             Expr::Literal(l) => Ok(self.literal(l)),
             Expr::Unary { op, rhs } => self.unary(op, rhs),
-            Expr::Binary { lhs, op, rhs } => self.binary(lhs, op, rhs),
+            Expr::Binary { op, lhs, rhs } => self.binary(op, lhs, rhs),
             Expr::Grouping(expr) => self.expression(expr),
-            Expr::Variable { name, offset: _ } => self.environment.borrow().get(name),
-            Expr::Assign { name, value } => {
+            Expr::Variable { name, offset } => match self.environment.borrow().get(name) {
+                Some(name) => Ok(name),
+                None => Err(InterpreterError::UnknownVariable(
+                    name.clone(),
+                    self.error_msg(*offset),
+                )),
+            },
+            Expr::Assign {
+                name,
+                value,
+                offset,
+            } => {
                 let value = self.evaluate(value)?;
-                self.environment
+                match self
+                    .environment
                     .borrow_mut()
-                    .assign(name.clone(), value.clone())?;
-                Ok(value)
+                    .assign(name.clone(), value.clone())
+                {
+                    Ok(..) => Ok(value),
+                    Err(..) => Err(InterpreterError::UnknownVariable(
+                        name.clone(),
+                        self.error_msg(*offset),
+                    )),
+                }
             }
         }
     }
@@ -195,7 +216,7 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn binary(&mut self, lhs: &Expr, op: &BinaryOp, rhs: &Expr) -> Result<Value, InterpreterError> {
+    fn binary(&mut self, op: &BinaryOp, lhs: &Expr, rhs: &Expr) -> Result<Value, InterpreterError> {
         let lhs = self.expression(lhs)?;
         let rhs = self.expression(rhs)?;
 
@@ -262,6 +283,7 @@ impl<'a> Interpreter<'a> {
                 println!("{}", val);
             }
             Stmt::Var { name, initializer } => {
+                // TODO Remove implicit variable initialization?
                 let mut val = Value::Nil;
                 if let Some(expr) = initializer {
                     val = self.evaluate(expr)?;

@@ -1,6 +1,4 @@
-#![allow(dead_code)]
-
-use std::fmt::Display;
+use std::fmt::Debug;
 
 pub enum Expr {
     Literal(Literal),
@@ -9,8 +7,8 @@ pub enum Expr {
         rhs: Box<Expr>,
     },
     Binary {
-        lhs: Box<Expr>,
         op: BinaryOp,
+        lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
     Grouping(Box<Expr>),
@@ -21,18 +19,23 @@ pub enum Expr {
     Assign {
         name: String,
         value: Box<Expr>,
+        offset: usize,
     },
 }
 
-impl Display for Expr {
+impl Debug for Expr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Expr::Literal(l) => write!(f, "{}", l),
-            Expr::Unary { op, rhs } => write!(f, "({} {})", op.optype, rhs),
-            Expr::Binary { lhs, op, rhs } => write!(f, "({} {} {})", op.optype, lhs, rhs),
-            Expr::Grouping(expr) => write!(f, "(group {})", expr),
+            Expr::Literal(l) => write!(f, "{:?}", l),
+            Expr::Unary { op, rhs } => write!(f, "({:?} {:?})", op.optype, rhs),
+            Expr::Binary { op, lhs, rhs } => write!(f, "({:?} {:?} {:?})", op.optype, lhs, rhs),
+            Expr::Grouping(expr) => write!(f, "(group {:?})", expr),
             Expr::Variable { name, offset: _ } => write!(f, "{}", name),
-            Expr::Assign { name, value } => write!(f, "{} = {}", name, value),
+            Expr::Assign {
+                name,
+                value,
+                offset: _,
+            } => write!(f, "{} = {:?}", name, value),
         }
     }
 }
@@ -45,7 +48,7 @@ pub enum Literal {
     Nil,
 }
 
-impl Display for Literal {
+impl Debug for Literal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Literal::Number(n) => write!(f, "{}", n),
@@ -63,7 +66,7 @@ pub enum UnaryOpType {
     Not,
 }
 
-impl Display for UnaryOpType {
+impl Debug for UnaryOpType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             UnaryOpType::Negate => write!(f, "-"),
@@ -97,7 +100,7 @@ pub enum BinaryOpType {
     Div,
 }
 
-impl Display for BinaryOpType {
+impl Debug for BinaryOpType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             BinaryOpType::Equal => write!(f, "=="),
@@ -137,16 +140,16 @@ mod tests {
     #[test]
     fn check_astprinter_example() {
         let expr = Expr::Binary {
+            op: BinaryOp::new(BinaryOpType::Mul, 0),
             lhs: Box::new(Expr::Unary {
                 op: UnaryOp::new(UnaryOpType::Negate, 0),
                 rhs: Box::new(Expr::Literal(Literal::Number(123.0))),
             }),
-            op: BinaryOp::new(BinaryOpType::Mul, 0),
             rhs: Box::new(Expr::Grouping(Box::new(Expr::Literal(Literal::Number(
                 45.67,
             ))))),
         };
-        assert_eq!(format!("{}", expr), "(* (- 123) (group 45.67))");
+        assert_eq!(format!("{:?}", expr), "(* (- 123) (group 45.67))");
     }
 }
 
@@ -160,17 +163,16 @@ pub enum Stmt {
     Block(Vec<Stmt>),
 }
 
-impl Display for Stmt {
+impl Debug for Stmt {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Stmt::Expression(expr) => write!(f, "{}", expr),
-            Stmt::Print(expr) => write!(f, "(print {})", expr),
+            Stmt::Expression(expr) => write!(f, "{:?}", expr),
+            Stmt::Print(expr) => write!(f, "print {:?}", expr),
             Stmt::Var { name, initializer } => match initializer {
-                Some(expr) => write!(f, "var {} = {}", name, expr),
+                Some(expr) => write!(f, "var {} = {:?}", name, expr),
                 None => write!(f, "var {}", name),
             },
-            // TODO Print properly
-            Stmt::Block(_statements) => todo!(),
+            Stmt::Block(statements) => write!(f, "Block {:#?}", statements),
         }
     }
 }

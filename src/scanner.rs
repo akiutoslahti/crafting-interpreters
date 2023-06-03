@@ -1,5 +1,8 @@
 use lazy_static::lazy_static;
-use std::{collections::HashMap, fmt::Display};
+use std::{
+    collections::HashMap,
+    fmt::{Debug, Display},
+};
 
 #[derive(Debug)]
 pub enum ScanningError {
@@ -115,7 +118,7 @@ pub enum LiteralType {
     Number(f64),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Token {
     pub tokentype: TokenType,
     pub lexeme: String,
@@ -135,38 +138,6 @@ impl Token {
             lexeme,
             offset,
             literal,
-        }
-    }
-}
-
-impl Display for Token {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "[{:?}, \"{}\", {}, {:?}]",
-            self.tokentype, self.lexeme, self.offset, self.literal
-        )
-    }
-}
-
-pub struct Tokens(pub Vec<Token>);
-
-impl Display for Tokens {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let tokens = &self.0;
-        if tokens.is_empty() {
-            write!(f, "[]")
-        } else {
-            let mut first = true;
-            let res = tokens.iter().fold(write!(f, "["), |res, token| {
-                if first {
-                    first = false;
-                    res.and_then(|_| write!(f, "{}", token))
-                } else {
-                    res.and_then(|_| write!(f, ",\n {}", token))
-                }
-            });
-            res.and_then(|_| write!(f, "]"))
         }
     }
 }
@@ -358,6 +329,7 @@ impl<'a> Scanner<'a> {
             '+' => self.add_token_basic(TokenType::Plus),
             ';' => self.add_token_basic(TokenType::Semicolon),
             '/' => {
+                // TODO Add support for block comments?
                 if self.peek_expect('/') {
                     while let Some(c) = self.peek() {
                         if c == '\n' {
@@ -423,7 +395,7 @@ impl<'a> Scanner<'a> {
     }
 }
 
-pub fn scan_tokens(source: &str) -> Result<Tokens, Vec<ScanningError>> {
+pub fn scan_tokens(source: &str) -> Result<Vec<Token>, Vec<ScanningError>> {
     let mut scanner = Scanner::new(source);
 
     scanner.scan_tokens();
@@ -431,6 +403,6 @@ pub fn scan_tokens(source: &str) -> Result<Tokens, Vec<ScanningError>> {
     if !scanner.errors.is_empty() {
         Err(scanner.errors)
     } else {
-        Ok(Tokens(scanner.tokens))
+        Ok(scanner.tokens)
     }
 }

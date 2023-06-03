@@ -1,6 +1,6 @@
 use crate::{
     ast::{BinaryOp, BinaryOpType, Expr, Literal, Stmt, UnaryOp, UnaryOpType},
-    scanner::{LiteralType, Token, TokenType, Tokens},
+    scanner::{LiteralType, Token, TokenType},
 };
 use lazy_static::lazy_static;
 use std::{collections::HashMap, fmt::Display};
@@ -84,10 +84,10 @@ pub struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(source: &'a str, tokens: Tokens) -> Self {
+    pub fn new(source: &'a str, tokens: Vec<Token>) -> Self {
         Self {
             source,
-            tokens: tokens.0,
+            tokens,
             current: 0,
         }
     }
@@ -208,10 +208,11 @@ impl<'a> Parser<'a> {
             let token = self.previous().clone();
             let value = self.assignment()?;
 
-            if let Expr::Variable { name, offset: _ } = expr {
+            if let Expr::Variable { name, offset } = expr {
                 return Ok(Expr::Assign {
                     name,
                     value: Box::new(value),
+                    offset,
                 });
             } else {
                 return Err(ParsingError::InvalidAssignmentTarget(
@@ -230,7 +231,7 @@ impl<'a> Parser<'a> {
             let op = token_to_binaryop(self.previous());
             let rhs = Box::new(self.comparison()?);
             let lhs = Box::new(expr);
-            expr = Expr::Binary { lhs, op, rhs };
+            expr = Expr::Binary { op, lhs, rhs };
         }
 
         Ok(expr)
@@ -248,7 +249,7 @@ impl<'a> Parser<'a> {
             let op = token_to_binaryop(self.previous());
             let rhs = Box::new(self.term()?);
             let lhs = Box::new(expr);
-            expr = Expr::Binary { lhs, op, rhs };
+            expr = Expr::Binary { op, lhs, rhs };
         }
 
         Ok(expr)
@@ -261,7 +262,7 @@ impl<'a> Parser<'a> {
             let op = token_to_binaryop(self.previous());
             let rhs = Box::new(self.factor()?);
             let lhs = Box::new(expr);
-            expr = Expr::Binary { lhs, op, rhs };
+            expr = Expr::Binary { op, lhs, rhs };
         }
 
         Ok(expr)
@@ -274,7 +275,7 @@ impl<'a> Parser<'a> {
             let op = token_to_binaryop(self.previous());
             let rhs = Box::new(self.unary()?);
             let lhs = Box::new(expr);
-            expr = Expr::Binary { lhs, op, rhs };
+            expr = Expr::Binary { op, lhs, rhs };
         }
 
         Ok(expr)
@@ -376,8 +377,7 @@ impl<'a> Parser<'a> {
         {
             s.clone()
         } else {
-            // TODO Add panic message
-            panic!("");
+            panic!("Unexpected error that shouldn't be possible.")
         };
 
         let initializer = if self.match_next(vec![TokenType::Equal]) {

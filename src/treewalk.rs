@@ -9,11 +9,11 @@ use std::{
 fn run(source: &str) {
     match scan_tokens(source) {
         Ok(tokens) => {
-            // println!("{}", tokens);
+            println!("Tokens {:#?}", tokens);
             let mut parser = Parser::new(source, tokens);
             match parser.parse() {
                 Ok(statements) => {
-                    // statements.iter().for_each(|stmt| println!("{}", stmt));
+                    println!("Statements {:#?}", statements);
                     let mut interpreter = Interpreter::new(source);
                     if let Err(err) = interpreter.interpret(statements) {
                         eprintln!("{}", err);
