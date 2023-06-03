@@ -1,5 +1,6 @@
 use std::fmt::Debug;
 
+#[derive(Clone)]
 pub enum Expr {
     Literal(Literal),
     Logical {
@@ -26,6 +27,11 @@ pub enum Expr {
         value: Box<Expr>,
         offset: usize,
     },
+    Call {
+        callee: Box<Expr>,
+        paren: usize,
+        arguments: Vec<Expr>,
+    },
 }
 
 impl Debug for Expr {
@@ -42,10 +48,16 @@ impl Debug for Expr {
                 value,
                 offset: _,
             } => write!(f, "{} = {:?}", name, value),
+            Expr::Call {
+                callee,
+                paren: _,
+                arguments,
+            } => write!(f, "{:?}({:?})", callee, arguments),
         }
     }
 }
 
+#[derive(Clone)]
 pub enum Literal {
     Number(f64),
     String(String),
@@ -81,6 +93,7 @@ impl Debug for LogicalOpType {
     }
 }
 
+#[derive(Clone)]
 pub struct LogicalOp {
     pub optype: LogicalOpType,
     pub offset: usize,
@@ -107,6 +120,7 @@ impl Debug for UnaryOpType {
     }
 }
 
+#[derive(Clone)]
 pub struct UnaryOp {
     pub optype: UnaryOpType,
     pub offset: usize,
@@ -149,6 +163,7 @@ impl Debug for BinaryOpType {
     }
 }
 
+#[derive(Clone)]
 pub struct BinaryOp {
     pub optype: BinaryOpType,
     pub offset: usize,
@@ -185,6 +200,7 @@ mod tests {
     }
 }
 
+#[derive(Clone)]
 pub enum Stmt {
     Expression(Expr),
     If {
@@ -202,6 +218,12 @@ pub enum Stmt {
         condition: Expr,
         body: Box<Stmt>,
     },
+    Function {
+        name: String,
+        parameters: Vec<String>,
+        body: Box<Stmt>,
+    },
+    Return(Option<Expr>),
 }
 
 impl Debug for Stmt {
@@ -224,6 +246,15 @@ impl Debug for Stmt {
             },
             Stmt::Block(statements) => write!(f, "Block {:#?}", statements),
             Stmt::While { condition, body } => write!(f, "while {:?} {:#?}", condition, body),
+            Stmt::Function {
+                name,
+                parameters,
+                body,
+            } => write!(f, "{}({:?}) {:#?}", name, parameters, body),
+            Stmt::Return(expr) => match expr {
+                Some(expr) => write!(f, "return {:?}", expr),
+                None => write!(f, "return"),
+            },
         }
     }
 }

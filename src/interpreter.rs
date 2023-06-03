@@ -5,8 +5,9 @@ use std::{
     cell::RefCell,
     collections::{hash_map::Entry, HashMap},
     f64::EPSILON,
-    fmt::Display,
+    fmt::{Debug, Display},
     rc::Rc,
+    time::{SystemTime, SystemTimeError},
 };
 
 pub enum InterpreterError {
@@ -14,6 +15,10 @@ pub enum InterpreterError {
     InvalidBinaryOperands(BinaryOpType, Value, Value, String),
     DivisionByZero(String),
     UnknownVariable(String, String),
+    Return(Value),
+    InvalidArgumentCount(usize, usize, String),
+    SystemTimeError(SystemTimeError),
+    NotCallable(Value, String),
 }
 
 impl Display for InterpreterError {
@@ -46,15 +51,110 @@ impl Display for InterpreterError {
             InterpreterError::DivisionByZero(msg) => {
                 write!(f, "{} Division by zero.\n\n{}", PREFIX, pad_msg(msg))
             }
-            InterpreterError::UnknownVariable(name, msg) => {
-                write!(
-                    f,
-                    "{} Unknown variable \"{}\".\n\n{}",
-                    PREFIX,
-                    name,
-                    pad_msg(msg)
-                )
+            InterpreterError::UnknownVariable(name, msg) => write!(
+                f,
+                "{} Unknown variable \"{}\".\n\n{}",
+                PREFIX,
+                name,
+                pad_msg(msg)
+            ),
+            InterpreterError::Return(_) => panic!("Unhandled Return statement!"),
+            InterpreterError::InvalidArgumentCount(got, expected, msg) => write!(
+                f,
+                "{} Invalid argument count (got: {}, expected: {}).\n\n{}",
+                PREFIX,
+                got,
+                expected,
+                pad_msg(msg)
+            ),
+            InterpreterError::SystemTimeError(err) => {
+                write!(f, "SystemTimeError difference: {:?}", err.duration())
             }
+            InterpreterError::NotCallable(val, msg) => write!(
+                f,
+                "{} Couldn't cast {} to 'Callable'.\n\n{}",
+                PREFIX,
+                val,
+                pad_msg(msg)
+            ),
+        }
+    }
+}
+
+trait Callable {
+    fn arity(&self) -> usize;
+    fn call(
+        &self,
+        interpreter: &mut Interpreter,
+        arguments: Vec<Value>,
+    ) -> Result<Value, InterpreterError>;
+}
+
+#[derive(Clone)]
+pub struct Primitive {
+    name: String,
+    arity: usize,
+    function: fn(&mut Interpreter, Vec<Value>) -> Result<Value, InterpreterError>,
+}
+
+impl Debug for Primitive {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<fun {}>", self.name)
+    }
+}
+
+impl Callable for Primitive {
+    fn arity(&self) -> usize {
+        self.arity
+    }
+
+    fn call(
+        &self,
+        interpreter: &mut Interpreter,
+        arguments: Vec<Value>,
+    ) -> Result<Value, InterpreterError> {
+        (self.function)(interpreter, arguments)
+    }
+}
+
+#[derive(Clone)]
+pub struct Function {
+    name: String,
+    parameters: Vec<String>,
+    body: Stmt,
+    closure: Rc<RefCell<Environment>>,
+}
+
+impl Debug for Function {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<fun {}>", self.name)
+    }
+}
+
+impl Callable for Function {
+    fn arity(&self) -> usize {
+        self.parameters.len()
+    }
+
+    fn call(
+        &self,
+        interpreter: &mut Interpreter,
+        arguments: Vec<Value>,
+    ) -> Result<Value, InterpreterError> {
+        let mut environment = Environment::new_with_enclosing(self.closure.clone());
+        self.parameters
+            .iter()
+            .zip(arguments.iter())
+            .for_each(|(param, arg)| environment.define(param.clone(), arg.clone()));
+
+        if let Stmt::Block(statements) = &self.body {
+            match interpreter.execute_block(statements, environment) {
+                Err(InterpreterError::Return(val)) => Ok(val),
+                Err(err) => Err(err),
+                _ => Ok(Value::Nil),
+            }
+        } else {
+            Ok(Value::Nil)
         }
     }
 }
@@ -65,6 +165,8 @@ pub enum Value {
     String(String),
     Bool(bool),
     Nil,
+    Primitive(Primitive),
+    Function(Function),
 }
 
 impl Display for Value {
@@ -75,6 +177,8 @@ impl Display for Value {
             Value::Bool(true) => write!(f, "true"),
             Value::Bool(false) => write!(f, "false"),
             Value::Nil => write!(f, "nil"),
+            Value::Primitive(fun) => write!(f, "{:?}", fun),
+            Value::Function(fun) => write!(f, "{:?}", fun),
         }
     }
 }
@@ -129,13 +233,33 @@ impl Environment {
 pub struct Interpreter {
     source: Rc<String>,
     environment: Rc<RefCell<Environment>>,
+    #[allow(dead_code)]
+    globals: Rc<RefCell<Environment>>,
 }
 
 impl Interpreter {
     pub fn new() -> Self {
+        let global_env = Rc::new(RefCell::new(Environment::new()));
+
+        global_env.borrow_mut().define(
+            "clock".to_owned(),
+            Value::Primitive(Primitive {
+                name: "clock".to_owned(),
+                arity: 0,
+                function: |_, _| {
+                    let time = match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+                        Ok(time) => time.as_millis(),
+                        Err(err) => return Err(InterpreterError::SystemTimeError(err)),
+                    };
+                    Ok(Value::Number(time as f64))
+                },
+            }),
+        );
+
         Self {
             source: Rc::new("".to_string()),
-            environment: Rc::new(RefCell::new(Environment::new())),
+            environment: global_env.clone(),
+            globals: global_env,
         }
     }
 
@@ -192,6 +316,39 @@ impl Interpreter {
                     )),
                 }
             }
+            Expr::Call {
+                callee,
+                paren,
+                arguments,
+            } => self.call(callee, *paren, arguments),
+        }
+    }
+
+    fn call(
+        &mut self,
+        callee: &Expr,
+        paren: usize,
+        arguments: &[Expr],
+    ) -> Result<Value, InterpreterError> {
+        let callee = self.evaluate(callee)?;
+        let arguments: Result<Vec<Value>, InterpreterError> =
+            arguments.iter().map(|arg| self.evaluate(arg)).collect();
+
+        match arguments {
+            Ok(arguments) => match to_callable(&callee) {
+                Some(callable) => {
+                    if callable.arity() != arguments.len() {
+                        return Err(InterpreterError::InvalidArgumentCount(
+                            arguments.len(),
+                            callable.arity(),
+                            self.error_msg(paren),
+                        ));
+                    }
+                    callable.call(self, arguments)
+                }
+                None => Err(InterpreterError::NotCallable(callee, self.error_msg(paren))),
+            },
+            Err(err) => Err(err),
         }
     }
 
@@ -261,6 +418,12 @@ impl Interpreter {
             (BinaryOpType::Add, Value::String(a), Value::String(b)) => {
                 Ok(Value::String(format!("{}{}", a, b)))
             }
+            (BinaryOpType::Add, Value::String(a), Value::Number(b)) => {
+                Ok(Value::String(format!("{}{}", a, b)))
+            }
+            (BinaryOpType::Add, Value::Number(a), Value::String(b)) => {
+                Ok(Value::String(format!("{}{}", a, b)))
+            }
             _ => Err(InterpreterError::InvalidBinaryOperands(
                 op.optype,
                 lhs,
@@ -274,11 +437,13 @@ impl Interpreter {
         self.expression(expr)
     }
 
-    fn execute_block(&mut self, statements: &[Stmt]) -> Result<(), InterpreterError> {
+    fn execute_block(
+        &mut self,
+        statements: &[Stmt],
+        environment: Environment,
+    ) -> Result<(), InterpreterError> {
         let previous = self.environment.clone();
-        self.environment = Rc::new(RefCell::new(Environment::new_with_enclosing(
-            self.environment.clone(),
-        )));
+        self.environment = Rc::new(RefCell::new(environment));
 
         let mut err = Ok(());
         for statement in statements {
@@ -316,6 +481,15 @@ impl Interpreter {
         Ok(())
     }
 
+    fn execute_return(&mut self, expr: &Option<Expr>) -> Result<(), InterpreterError> {
+        let val = match expr {
+            Some(expr) => self.evaluate(expr)?,
+            None => Value::Nil,
+        };
+
+        Err(InterpreterError::Return(val))
+    }
+
     fn execute(&mut self, stmt: &Stmt) -> Result<(), InterpreterError> {
         match stmt {
             Stmt::Expression(expr) => {
@@ -333,13 +507,30 @@ impl Interpreter {
                 }
                 self.environment.borrow_mut().define(name.clone(), val);
             }
-            Stmt::Block(statements) => self.execute_block(statements)?,
+            Stmt::Block(statements) => self.execute_block(
+                statements,
+                Environment::new_with_enclosing(self.environment.clone()),
+            )?,
             Stmt::If {
                 condition,
                 then_branch,
                 else_branch,
             } => self.execute_if(condition, then_branch, else_branch)?,
             Stmt::While { condition, body } => self.execute_while(condition, body)?,
+            Stmt::Function {
+                name,
+                parameters,
+                body,
+            } => self.environment.borrow_mut().define(
+                name.to_owned(),
+                Value::Function(Function {
+                    name: name.to_owned(),
+                    parameters: parameters.to_vec(),
+                    body: *body.clone(),
+                    closure: self.environment.clone(),
+                }),
+            ),
+            Stmt::Return(expr) => self.execute_return(expr)?,
         }
 
         Ok(())
@@ -357,6 +548,14 @@ impl Interpreter {
         }
 
         Ok(())
+    }
+}
+
+fn to_callable(val: &Value) -> Option<&dyn Callable> {
+    match val {
+        Value::Primitive(fun) => Some(fun),
+        Value::Function(fun) => Some(fun),
+        _ => None,
     }
 }
 

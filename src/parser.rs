@@ -41,6 +41,8 @@ pub enum ParsingError {
     MissingExpression(Token, String),
     UnmetExpectation(Token, TokenType, String),
     InvalidAssignmentTarget(String),
+    TooManyArguments(String),
+    TooManyParameters(String),
 }
 
 impl Display for ParsingError {
@@ -53,34 +55,40 @@ impl Display for ParsingError {
                 .collect()
         };
         match self {
-            ParsingError::MissingExpression(token, msg) => {
-                write!(
-                    f,
-                    "{} Expected expression, got token: {:?} ({:?}).\n\n{}",
-                    PREFIX,
-                    token.tokentype,
-                    token.lexeme,
-                    pad_msg(msg)
-                )
-            }
-            ParsingError::UnmetExpectation(token, expected, msg) => {
-                write!(
-                    f,
-                    "{} Expected token: {:?}, got token: {:?}.\n\n{}",
-                    PREFIX,
-                    expected,
-                    token.tokentype,
-                    pad_msg(msg)
-                )
-            }
-            ParsingError::InvalidAssignmentTarget(msg) => {
-                write!(
-                    f,
-                    "{} Invalid assignment target.\n\n{}",
-                    PREFIX,
-                    pad_msg(msg)
-                )
-            }
+            ParsingError::MissingExpression(token, msg) => write!(
+                f,
+                "{} Expected expression, got token: {:?} ({:?}).\n\n{}",
+                PREFIX,
+                token.tokentype,
+                token.lexeme,
+                pad_msg(msg)
+            ),
+            ParsingError::UnmetExpectation(token, expected, msg) => write!(
+                f,
+                "{} Expected token: {:?}, got token: {:?}.\n\n{}",
+                PREFIX,
+                expected,
+                token.tokentype,
+                pad_msg(msg)
+            ),
+            ParsingError::InvalidAssignmentTarget(msg) => write!(
+                f,
+                "{} Invalid assignment target.\n\n{}",
+                PREFIX,
+                pad_msg(msg)
+            ),
+            ParsingError::TooManyArguments(msg) => write!(
+                f,
+                "{} Too many (> 255) arguments for a function call.\n\n{}",
+                PREFIX,
+                pad_msg(msg)
+            ),
+            ParsingError::TooManyParameters(msg) => write!(
+                f,
+                "{} Too many (> 255) parameters for a function.\n\n{}",
+                PREFIX,
+                pad_msg(msg)
+            ),
         }
     }
 }
@@ -321,8 +329,46 @@ impl<'a> Parser<'a> {
             let rhs = Box::new(self.unary()?);
             Ok(Expr::Unary { op, rhs })
         } else {
-            self.primary()
+            self.call()
         }
+    }
+
+    fn finish_call(&mut self, callee: Expr) -> Result<Expr, ParsingError> {
+        let mut arguments = vec![];
+        if !self.check(TokenType::RightParen) {
+            loop {
+                if arguments.len() >= 255 {
+                    let token = self.peek();
+                    return Err(ParsingError::TooManyArguments(self.error_msg(token)));
+                }
+                arguments.push(self.expression()?);
+                if !self.match_next(vec![TokenType::Comma]) {
+                    break;
+                }
+            }
+        }
+
+        let paren = self.consume(TokenType::RightParen)?;
+
+        Ok(Expr::Call {
+            callee: Box::new(callee),
+            paren: paren.offset,
+            arguments,
+        })
+    }
+
+    fn call(&mut self) -> Result<Expr, ParsingError> {
+        let mut expr = self.primary()?;
+
+        loop {
+            if self.match_next(vec![TokenType::LeftParen]) {
+                expr = self.finish_call(expr)?;
+            } else {
+                break;
+            }
+        }
+
+        Ok(expr)
     }
 
     fn primary(&mut self) -> Result<Expr, ParsingError> {
@@ -469,6 +515,51 @@ impl<'a> Parser<'a> {
         Ok(body)
     }
 
+    fn function_statement(&mut self) -> Result<Stmt, ParsingError> {
+        let name = self.consume(TokenType::Identifier)?.lexeme.clone();
+        self.consume(TokenType::LeftParen)?;
+
+        let mut parameters: Vec<String> = vec![];
+        if !self.check(TokenType::RightParen) {
+            loop {
+                if parameters.len() >= 255 {
+                    let token = self.peek();
+                    return Err(ParsingError::TooManyParameters(self.error_msg(token)));
+                }
+
+                let token = self.consume(TokenType::Identifier)?;
+
+                parameters.push(token.lexeme.clone());
+
+                if !self.match_next(vec![TokenType::Comma]) {
+                    break;
+                }
+            }
+        }
+
+        self.consume(TokenType::RightParen)?;
+
+        self.consume(TokenType::LeftBrace)?;
+        let body = Box::new(self.block_statement()?);
+
+        Ok(Stmt::Function {
+            name,
+            parameters,
+            body,
+        })
+    }
+
+    fn return_statement(&mut self) -> Result<Stmt, ParsingError> {
+        let value = if !self.check(TokenType::Semicolon) {
+            Some(self.expression()?)
+        } else {
+            None
+        };
+
+        self.consume(TokenType::Semicolon)?;
+        Ok(Stmt::Return(value))
+    }
+
     fn statement(&mut self) -> Result<Stmt, ParsingError> {
         if self.match_next(vec![TokenType::LeftBrace]) {
             return self.block_statement();
@@ -484,6 +575,12 @@ impl<'a> Parser<'a> {
         }
         if self.match_next(vec![TokenType::For]) {
             return self.for_statement();
+        }
+        if self.match_next(vec![TokenType::Fun]) {
+            return self.function_statement();
+        }
+        if self.match_next(vec![TokenType::Return]) {
+            return self.return_statement();
         }
 
         self.expression_statement()

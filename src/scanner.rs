@@ -21,15 +21,13 @@ impl Display for ScanningError {
         };
 
         match self {
-            ScanningError::UnexpectedChar(c, msg) => {
-                write!(
-                    f,
-                    "{} Unexpected character \'{}\'.\n\n{}",
-                    PREFIX,
-                    c,
-                    pad_msg(msg)
-                )
-            }
+            ScanningError::UnexpectedChar(c, msg) => write!(
+                f,
+                "{} Unexpected character \'{}\'.\n\n{}",
+                PREFIX,
+                c,
+                pad_msg(msg)
+            ),
             ScanningError::UnterminatedString(msg) => {
                 write!(f, "{} Unterminated string.\n\n{}", PREFIX, pad_msg(msg))
             }
