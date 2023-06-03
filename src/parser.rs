@@ -412,6 +412,63 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn while_statement(&mut self) -> Result<Stmt, ParsingError> {
+        self.consume(TokenType::LeftParen)?;
+        let condition = self.expression()?;
+        self.consume(TokenType::RightParen)?;
+
+        let body = Box::new(self.statement()?);
+        Ok(Stmt::While { condition, body })
+    }
+
+    fn for_statement(&mut self) -> Result<Stmt, ParsingError> {
+        self.consume(TokenType::LeftParen)?;
+        let initializer = if self.match_next(vec![TokenType::Semicolon]) {
+            None
+        } else if self.match_next(vec![TokenType::Var]) {
+            Some(self.var_declaration()?)
+        } else {
+            Some(self.expression_statement()?)
+        };
+
+        let condition = if self.check(TokenType::Semicolon) {
+            None
+        } else {
+            Some(self.expression()?)
+        };
+        self.consume(TokenType::Semicolon)?;
+
+        let increment = if self.check(TokenType::RightParen) {
+            None
+        } else {
+            Some(self.expression()?)
+        };
+        self.consume(TokenType::RightParen)?;
+
+        let mut body = self.statement()?;
+
+        if let Some(increment) = increment {
+            body = Stmt::Block(vec![body, Stmt::Expression(increment)]);
+        }
+
+        body = match condition {
+            Some(expr) => Stmt::While {
+                condition: expr,
+                body: Box::new(body),
+            },
+            None => Stmt::While {
+                condition: Expr::Literal(Literal::True),
+                body: Box::new(body),
+            },
+        };
+
+        if let Some(initializer) = initializer {
+            body = Stmt::Block(vec![initializer, body]);
+        }
+
+        Ok(body)
+    }
+
     fn statement(&mut self) -> Result<Stmt, ParsingError> {
         if self.match_next(vec![TokenType::LeftBrace]) {
             return self.block_statement();
@@ -421,6 +478,12 @@ impl<'a> Parser<'a> {
         }
         if self.match_next(vec![TokenType::If]) {
             return self.if_statement();
+        }
+        if self.match_next(vec![TokenType::While]) {
+            return self.while_statement();
+        }
+        if self.match_next(vec![TokenType::For]) {
+            return self.for_statement();
         }
 
         self.expression_statement()

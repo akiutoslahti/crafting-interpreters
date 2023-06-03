@@ -198,6 +198,10 @@ pub enum Stmt {
         initializer: Option<Expr>,
     },
     Block(Vec<Stmt>),
+    While {
+        condition: Expr,
+        body: Box<Stmt>,
+    },
 }
 
 impl Debug for Stmt {
@@ -219,6 +223,7 @@ impl Debug for Stmt {
                 None => write!(f, "var {}", name),
             },
             Stmt::Block(statements) => write!(f, "Block {:#?}", statements),
+            Stmt::While { condition, body } => write!(f, "while {:?} {:#?}", condition, body),
         }
     }
 }

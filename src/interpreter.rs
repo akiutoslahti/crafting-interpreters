@@ -308,6 +308,14 @@ impl Interpreter {
         Ok(())
     }
 
+    fn execute_while(&mut self, condition: &Expr, body: &Stmt) -> Result<(), InterpreterError> {
+        while is_truthy(&self.evaluate(condition)?) {
+            self.execute(body)?;
+        }
+
+        Ok(())
+    }
+
     fn execute(&mut self, stmt: &Stmt) -> Result<(), InterpreterError> {
         match stmt {
             Stmt::Expression(expr) => {
@@ -331,6 +339,7 @@ impl Interpreter {
                 then_branch,
                 else_branch,
             } => self.execute_if(condition, then_branch, else_branch)?,
+            Stmt::While { condition, body } => self.execute_while(condition, body)?,
         }
 
         Ok(())
