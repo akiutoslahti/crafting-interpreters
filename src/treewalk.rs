@@ -3,19 +3,18 @@ use std::{
     fs,
     io::{self, Write},
     path::Path,
+    rc::Rc,
 };
 
-// TODO Create scanner, parser and interpreter outside run() function to keep state and fix REPL
-fn run(source: &str) {
-    match scan_tokens(source) {
+fn run(source: Rc<String>, interpreter: &mut Interpreter) {
+    match scan_tokens(&source) {
         Ok(tokens) => {
-            println!("Tokens {:#?}", tokens);
-            let mut parser = Parser::new(source, tokens);
+            // println!("Tokens {:#?}", tokens);
+            let mut parser = Parser::new(&source, tokens);
             match parser.parse() {
                 Ok(statements) => {
-                    println!("Statements {:#?}", statements);
-                    let mut interpreter = Interpreter::new(source);
-                    if let Err(err) = interpreter.interpret(statements) {
+                    // println!("Statements {:#?}", statements);
+                    if let Err(err) = interpreter.interpret(source.clone(), statements) {
                         eprintln!("{}", err);
                     }
                 }
@@ -29,10 +28,11 @@ fn run(source: &str) {
 pub fn run_pathname(pathname: &str) {
     let source = fs::read_to_string(Path::new(pathname))
         .unwrap_or_else(|_| panic!("Couldn't read \"{}\" pathname to UTF-8 string", pathname));
-    run(&source);
+    run(Rc::new(source), &mut Interpreter::new());
 }
 
 pub fn run_prompt() {
+    let mut interpreter = Interpreter::new();
     loop {
         print!("> ");
         #[allow(unused_must_use)]
@@ -46,6 +46,6 @@ pub fn run_prompt() {
         if line == "\n" {
             break;
         }
-        run(&line);
+        run(Rc::new(line), &mut interpreter);
     }
 }

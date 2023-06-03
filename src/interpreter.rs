@@ -124,15 +124,15 @@ impl Environment {
     }
 }
 
-pub struct Interpreter<'a> {
-    source: &'a str,
+pub struct Interpreter {
+    source: Rc<String>,
     environment: Rc<RefCell<Environment>>,
 }
 
-impl<'a> Interpreter<'a> {
-    pub fn new(source: &'a str) -> Self {
+impl Interpreter {
+    pub fn new() -> Self {
         Self {
-            source,
+            source: Rc::new("".to_string()),
             environment: Rc::new(RefCell::new(Environment::new())),
         }
     }
@@ -296,7 +296,13 @@ impl<'a> Interpreter<'a> {
         Ok(())
     }
 
-    pub fn interpret(&mut self, statements: Vec<Stmt>) -> Result<(), InterpreterError> {
+    pub fn interpret(
+        &mut self,
+        source: Rc<String>,
+        statements: Vec<Stmt>,
+    ) -> Result<(), InterpreterError> {
+        self.source = source;
+
         for stmt in &statements {
             self.execute(stmt)?;
         }
