@@ -1,5 +1,7 @@
 use crate::{
-    ast::{BinaryOp, BinaryOpType, Expr, Literal, Stmt, UnaryOp, UnaryOpType},
+    ast::{
+        BinaryOp, BinaryOpType, Expr, Literal, LogicalOp, LogicalOpType, Stmt, UnaryOp, UnaryOpType,
+    },
     scanner::{LiteralType, Token, TokenType},
 };
 use lazy_static::lazy_static;
@@ -24,6 +26,12 @@ lazy_static! {
         let mut ops = HashMap::new();
         ops.insert(TokenType::Minus, UnaryOpType::Negate);
         ops.insert(TokenType::Bang, UnaryOpType::Not);
+        ops
+    };
+    static ref LOGICALOPS: HashMap<TokenType, LogicalOpType> = {
+        let mut ops = HashMap::new();
+        ops.insert(TokenType::And, LogicalOpType::And);
+        ops.insert(TokenType::Or, LogicalOpType::Or);
         ops
     };
 }
@@ -202,7 +210,7 @@ impl<'a> Parser<'a> {
     }
 
     fn assignment(&mut self) -> Result<Expr, ParsingError> {
-        let expr = self.equality()?;
+        let expr = self.or()?;
 
         if self.match_next(vec![TokenType::Equal]) {
             let token = self.previous().clone();
@@ -219,6 +227,32 @@ impl<'a> Parser<'a> {
                     self.error_msg(&token),
                 ));
             }
+        }
+
+        Ok(expr)
+    }
+
+    fn or(&mut self) -> Result<Expr, ParsingError> {
+        let mut expr = self.and()?;
+
+        if self.match_next(vec![TokenType::Or]) {
+            let op = token_to_logicalop(self.previous());
+            let rhs = Box::new(self.and()?);
+            let lhs = Box::new(expr);
+            expr = Expr::Logical { op, lhs, rhs }
+        }
+
+        Ok(expr)
+    }
+
+    fn and(&mut self) -> Result<Expr, ParsingError> {
+        let mut expr = self.equality()?;
+
+        if self.match_next(vec![TokenType::And]) {
+            let op = token_to_logicalop(self.previous());
+            let rhs = Box::new(self.equality()?);
+            let lhs = Box::new(expr);
+            expr = Expr::Logical { op, lhs, rhs }
         }
 
         Ok(expr)
@@ -442,6 +476,16 @@ impl<'a> Parser<'a> {
         } else {
             Ok(statements)
         }
+    }
+}
+
+fn token_to_logicalop(token: &Token) -> LogicalOp {
+    match LOGICALOPS.get(&token.tokentype) {
+        Some(op) => LogicalOp::new(*op, token.offset),
+        None => panic!(
+            "Invalid tokentype ({:?}) for logical operation",
+            token.tokentype
+        ),
     }
 }
 

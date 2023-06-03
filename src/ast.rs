@@ -2,6 +2,11 @@ use std::fmt::Debug;
 
 pub enum Expr {
     Literal(Literal),
+    Logical {
+        op: LogicalOp,
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
+    },
     Unary {
         op: UnaryOp,
         rhs: Box<Expr>,
@@ -27,6 +32,7 @@ impl Debug for Expr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Expr::Literal(l) => write!(f, "{:?}", l),
+            Expr::Logical { op, lhs, rhs } => write!(f, "({:?} {:?} {:?})", op.optype, lhs, rhs),
             Expr::Unary { op, rhs } => write!(f, "({:?} {:?})", op.optype, rhs),
             Expr::Binary { op, lhs, rhs } => write!(f, "({:?} {:?} {:?})", op.optype, lhs, rhs),
             Expr::Grouping(expr) => write!(f, "(group {:?})", expr),
@@ -57,6 +63,32 @@ impl Debug for Literal {
             Literal::False => write!(f, "false"),
             Literal::Nil => write!(f, "nil"),
         }
+    }
+}
+
+#[derive(Copy, Clone)]
+pub enum LogicalOpType {
+    And,
+    Or,
+}
+
+impl Debug for LogicalOpType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LogicalOpType::And => write!(f, "and"),
+            LogicalOpType::Or => write!(f, "or"),
+        }
+    }
+}
+
+pub struct LogicalOp {
+    pub optype: LogicalOpType,
+    pub offset: usize,
+}
+
+impl LogicalOp {
+    pub fn new(optype: LogicalOpType, offset: usize) -> Self {
+        Self { optype, offset }
     }
 }
 

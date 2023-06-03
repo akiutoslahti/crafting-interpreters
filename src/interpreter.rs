@@ -1,4 +1,6 @@
-use crate::ast::{BinaryOp, BinaryOpType, Expr, Literal, Stmt, UnaryOp, UnaryOpType};
+use crate::ast::{
+    BinaryOp, BinaryOpType, Expr, Literal, LogicalOp, LogicalOpType, Stmt, UnaryOp, UnaryOpType,
+};
 use std::{
     cell::RefCell,
     collections::{hash_map::Entry, HashMap},
@@ -161,6 +163,7 @@ impl Interpreter {
     fn expression(&mut self, expr: &Expr) -> Result<Value, InterpreterError> {
         match expr {
             Expr::Literal(l) => Ok(self.literal(l)),
+            Expr::Logical { op, lhs, rhs } => self.logical(op, lhs, rhs),
             Expr::Unary { op, rhs } => self.unary(op, rhs),
             Expr::Binary { op, lhs, rhs } => self.binary(op, lhs, rhs),
             Expr::Grouping(expr) => self.expression(expr),
@@ -202,12 +205,29 @@ impl Interpreter {
         }
     }
 
+    fn logical(
+        &mut self,
+        op: &LogicalOp,
+        lhs: &Expr,
+        rhs: &Expr,
+    ) -> Result<Value, InterpreterError> {
+        let lhs = self.expression(lhs)?;
+
+        match op.optype {
+            LogicalOpType::Or if is_truthy(&lhs) => return Ok(lhs),
+            LogicalOpType::And if !is_truthy(&lhs) => return Ok(lhs),
+            _ => {}
+        }
+
+        self.expression(rhs)
+    }
+
     fn unary(&mut self, op: &UnaryOp, rhs: &Expr) -> Result<Value, InterpreterError> {
         let rhs = self.expression(rhs)?;
 
         match (op.optype, rhs.clone()) {
             (UnaryOpType::Negate, Value::Number(n)) => Ok(Value::Number(-n)),
-            (UnaryOpType::Not, val) => Ok(Value::Bool(!is_truthy(val))),
+            (UnaryOpType::Not, val) => Ok(Value::Bool(!is_truthy(&val))),
             _ => Err(InterpreterError::InvalidUnaryOperand(
                 op.optype,
                 rhs,
@@ -221,8 +241,8 @@ impl Interpreter {
         let rhs = self.expression(rhs)?;
 
         match (op.optype, lhs.clone(), rhs.clone()) {
-            (BinaryOpType::Equal, a, b) => Ok(Value::Bool(is_equal(a, b))),
-            (BinaryOpType::NotEqual, a, b) => Ok(Value::Bool(!is_equal(a, b))),
+            (BinaryOpType::Equal, a, b) => Ok(Value::Bool(is_equal(&a, &b))),
+            (BinaryOpType::NotEqual, a, b) => Ok(Value::Bool(!is_equal(&a, &b))),
             (BinaryOpType::Less, Value::Number(a), Value::Number(b)) => Ok(Value::Bool(a < b)),
             (BinaryOpType::LessEqual, Value::Number(a), Value::Number(b)) => {
                 Ok(Value::Bool(a <= b))
@@ -279,7 +299,7 @@ impl Interpreter {
         then_branch: &Stmt,
         else_branch: &Option<Box<Stmt>>,
     ) -> Result<(), InterpreterError> {
-        if is_truthy(self.evaluate(condition)?) {
+        if is_truthy(&self.evaluate(condition)?) {
             self.execute(then_branch)?;
         } else if let Some(stmt) = else_branch {
             self.execute(stmt)?;
@@ -331,11 +351,11 @@ impl Interpreter {
     }
 }
 
-fn is_truthy(val: Value) -> bool {
+fn is_truthy(val: &Value) -> bool {
     !matches!(val, Value::Nil | Value::Bool(false))
 }
 
-fn is_equal(a: Value, b: Value) -> bool {
+fn is_equal(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Number(a), Value::Number(b)) => (a - b).abs() < EPSILON,
         (Value::Bool(a), Value::Bool(b)) => a == b,
