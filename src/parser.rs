@@ -360,12 +360,33 @@ impl<'a> Parser<'a> {
         Ok(Stmt::Block(statements))
     }
 
+    fn if_statement(&mut self) -> Result<Stmt, ParsingError> {
+        self.consume(TokenType::LeftParen)?;
+        let condition = self.expression()?;
+        self.consume(TokenType::RightParen)?;
+
+        let then_branch = Box::new(self.statement()?);
+        let mut else_branch = None;
+        if self.match_next(vec![TokenType::Else]) {
+            else_branch = Some(Box::new(self.statement()?));
+        }
+
+        Ok(Stmt::If {
+            condition,
+            then_branch,
+            else_branch,
+        })
+    }
+
     fn statement(&mut self) -> Result<Stmt, ParsingError> {
         if self.match_next(vec![TokenType::LeftBrace]) {
             return self.block_statement();
         }
         if self.match_next(vec![TokenType::Print]) {
             return self.print_statement();
+        }
+        if self.match_next(vec![TokenType::If]) {
+            return self.if_statement();
         }
 
         self.expression_statement()

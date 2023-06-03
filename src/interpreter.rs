@@ -273,6 +273,21 @@ impl Interpreter {
         err
     }
 
+    fn execute_if(
+        &mut self,
+        condition: &Expr,
+        then_branch: &Stmt,
+        else_branch: &Option<Box<Stmt>>,
+    ) -> Result<(), InterpreterError> {
+        if is_truthy(self.evaluate(condition)?) {
+            self.execute(then_branch)?;
+        } else if let Some(stmt) = else_branch {
+            self.execute(stmt)?;
+        }
+
+        Ok(())
+    }
+
     fn execute(&mut self, stmt: &Stmt) -> Result<(), InterpreterError> {
         match stmt {
             Stmt::Expression(expr) => {
@@ -291,6 +306,11 @@ impl Interpreter {
                 self.environment.borrow_mut().define(name.clone(), val);
             }
             Stmt::Block(statements) => self.execute_block(statements)?,
+            Stmt::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => self.execute_if(condition, then_branch, else_branch)?,
         }
 
         Ok(())

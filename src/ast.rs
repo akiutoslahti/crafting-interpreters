@@ -155,6 +155,11 @@ mod tests {
 
 pub enum Stmt {
     Expression(Expr),
+    If {
+        condition: Expr,
+        then_branch: Box<Stmt>,
+        else_branch: Option<Box<Stmt>>,
+    },
     Print(Expr),
     Var {
         name: String,
@@ -167,6 +172,15 @@ impl Debug for Stmt {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Stmt::Expression(expr) => write!(f, "{:?}", expr),
+            Stmt::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => write!(
+                f,
+                "if ({:?}) then {:?} else {:?}",
+                condition, then_branch, else_branch
+            ),
             Stmt::Print(expr) => write!(f, "print {:?}", expr),
             Stmt::Var { name, initializer } => match initializer {
                 Some(expr) => write!(f, "var {} = {:?}", name, expr),
