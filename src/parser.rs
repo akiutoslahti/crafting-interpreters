@@ -1,6 +1,7 @@
 use crate::{
     ast::{
-        BinaryOp, BinaryOpType, Expr, Literal, LogicalOp, LogicalOpType, Stmt, UnaryOp, UnaryOpType,
+        BinaryOp, BinaryOpType, Expr, Literal, LogicalOp, LogicalOpType, Stmt, UnaryOp,
+        UnaryOpType, Variable,
     },
     scanner::{LiteralType, Token, TokenType},
 };
@@ -103,7 +104,7 @@ pub struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(source: &'a str, tokens: Vec<Token>) -> Self {
+    fn new(source: &'a str, tokens: Vec<Token>) -> Self {
         Self {
             source,
             tokens,
@@ -227,11 +228,10 @@ impl<'a> Parser<'a> {
             let token = self.previous().clone();
             let value = self.assignment()?;
 
-            if let Expr::Variable { name, offset } = expr {
+            if let Expr::Variable(var) = expr {
                 return Ok(Expr::Assign {
-                    name,
+                    var,
                     value: Box::new(value),
-                    offset,
                 });
             } else {
                 return Err(ParsingError::InvalidAssignmentTarget(
@@ -400,10 +400,10 @@ impl<'a> Parser<'a> {
                 ));
             }
 
-            return Ok(Expr::Variable {
+            return Ok(Expr::Variable(Variable {
                 name,
                 offset: token.offset,
-            });
+            }));
         }
 
         if self.match_next(vec![TokenType::LeftParen]) {
@@ -431,7 +431,7 @@ impl<'a> Parser<'a> {
         Ok(Stmt::Print(expr))
     }
 
-    fn block_statement(&mut self) -> Result<Stmt, ParsingError> {
+    fn block_statement(&mut self) -> Result<Vec<Stmt>, ParsingError> {
         let mut statements: Vec<Stmt> = vec![];
 
         while !self.check(TokenType::RightBrace) {
@@ -440,7 +440,7 @@ impl<'a> Parser<'a> {
 
         self.consume(TokenType::RightBrace)?;
 
-        Ok(Stmt::Block(statements))
+        Ok(statements)
     }
 
     fn if_statement(&mut self) -> Result<Stmt, ParsingError> {
@@ -519,10 +519,19 @@ impl<'a> Parser<'a> {
     }
 
     fn function_statement(&mut self) -> Result<Stmt, ParsingError> {
-        let name = self.consume(TokenType::Identifier)?.lexeme.clone();
+        let token = self.consume(TokenType::Identifier)?;
+        let name = if let Some(LiteralType::Identifier(s)) = &token.literal {
+            s.clone()
+        } else {
+            panic!(
+                "Mismatch between literal ({:?}) and token type ({:?})",
+                token.literal, token.tokentype
+            );
+        };
+        let offset = token.offset;
         self.consume(TokenType::LeftParen)?;
 
-        let mut parameters: Vec<String> = vec![];
+        let mut parameters: Vec<Variable> = vec![];
         if !self.check(TokenType::RightParen) {
             loop {
                 if parameters.len() >= 255 {
@@ -531,8 +540,18 @@ impl<'a> Parser<'a> {
                 }
 
                 let token = self.consume(TokenType::Identifier)?;
-
-                parameters.push(token.lexeme.clone());
+                let name = if let Some(LiteralType::Identifier(s)) = &token.literal {
+                    s.clone()
+                } else {
+                    panic!(
+                        "Mismatch between literal ({:?}) and token type ({:?})",
+                        token.literal, token.tokentype
+                    );
+                };
+                parameters.push(Variable {
+                    name,
+                    offset: token.offset,
+                });
 
                 if !self.match_next(vec![TokenType::Comma]) {
                     break;
@@ -543,29 +562,30 @@ impl<'a> Parser<'a> {
         self.consume(TokenType::RightParen)?;
 
         self.consume(TokenType::LeftBrace)?;
-        let body = Box::new(self.block_statement()?);
+        let body = self.block_statement()?;
 
         Ok(Stmt::Function {
-            name,
+            var: Variable { name, offset },
             parameters,
             body,
         })
     }
 
-    fn return_statement(&mut self) -> Result<Stmt, ParsingError> {
-        let value = if !self.check(TokenType::Semicolon) {
+    fn return_statement(&mut self, offset: usize) -> Result<Stmt, ParsingError> {
+        let expr = if !self.check(TokenType::Semicolon) {
             Some(self.expression()?)
         } else {
             None
         };
 
         self.consume(TokenType::Semicolon)?;
-        Ok(Stmt::Return(value))
+
+        Ok(Stmt::Return { expr, offset })
     }
 
     fn statement(&mut self) -> Result<Stmt, ParsingError> {
         if self.match_next(vec![TokenType::LeftBrace]) {
-            return self.block_statement();
+            return Ok(Stmt::Block(self.block_statement()?));
         }
         if self.match_next(vec![TokenType::Print]) {
             return self.print_statement();
@@ -583,19 +603,22 @@ impl<'a> Parser<'a> {
             return self.function_statement();
         }
         if self.match_next(vec![TokenType::Return]) {
-            return self.return_statement();
+            return self.return_statement(self.previous().offset);
         }
 
         self.expression_statement()
     }
 
     fn var_declaration(&mut self) -> Result<Stmt, ParsingError> {
-        let name = if let Some(LiteralType::Identifier(s)) =
-            &self.consume(TokenType::Identifier)?.literal
-        {
+        let token = self.consume(TokenType::Identifier)?;
+        let offset = token.offset;
+        let name = if let Some(LiteralType::Identifier(s)) = &token.literal {
             s.clone()
         } else {
-            panic!("Unexpected error that shouldn't be possible.")
+            panic!(
+                "Mismatch between literal ({:?}) and token type ({:?})",
+                token.literal, token.tokentype
+            );
         };
 
         let initializer = if self.match_next(vec![TokenType::Equal]) {
@@ -606,7 +629,10 @@ impl<'a> Parser<'a> {
 
         self.consume(TokenType::Semicolon)?;
 
-        Ok(Stmt::Var { name, initializer })
+        Ok(Stmt::Var {
+            var: Variable { name, offset },
+            initializer,
+        })
     }
 
     fn declaration(&mut self) -> Result<Stmt, ParsingError> {
@@ -623,7 +649,7 @@ impl<'a> Parser<'a> {
         stmt
     }
 
-    pub fn parse(&mut self) -> Result<Vec<Stmt>, Vec<ParsingError>> {
+    fn parse(&mut self) -> Result<Vec<Stmt>, Vec<ParsingError>> {
         let mut statements = vec![];
         let mut errors = vec![];
 
@@ -642,6 +668,11 @@ impl<'a> Parser<'a> {
     }
 }
 
+pub fn parse_statements(src: &str, tokens: Vec<Token>) -> Result<Vec<Stmt>, Vec<ParsingError>> {
+    let mut parser = Parser::new(src, tokens);
+    parser.parse()
+}
+
 fn token_to_logicalop(token: &Token) -> LogicalOp {
     match LOGICALOPS.get(&token.tokentype) {
         Some(op) => LogicalOp::new(*op, token.offset),
@@ -655,6 +686,7 @@ fn token_to_logicalop(token: &Token) -> LogicalOp {
 fn token_to_binaryop(token: &Token) -> BinaryOp {
     match BINARYOPS.get(&token.tokentype) {
         Some(op) => BinaryOp::new(*op, token.offset),
+
         None => panic!(
             "Invalid tokentype ({:?}) for binary operation",
             token.tokentype

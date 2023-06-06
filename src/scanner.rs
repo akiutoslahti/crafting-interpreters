@@ -149,7 +149,7 @@ pub struct Scanner<'a> {
 }
 
 impl<'a> Scanner<'a> {
-    pub fn new(source: &'a str) -> Self {
+    fn new(source: &'a str) -> Self {
         Self {
             source,
             start: 0,
@@ -383,7 +383,7 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    pub fn scan_tokens(&mut self) {
+    fn scan_tokens(&mut self) {
         while !self.eof() {
             self.start = self.current;
             self.scan_token();

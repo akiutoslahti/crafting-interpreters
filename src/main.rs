@@ -4,6 +4,7 @@ mod ast;
 mod bytecode;
 mod interpreter;
 mod parser;
+mod resolver;
 mod scanner;
 mod treewalk;
 

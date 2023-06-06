@@ -1,5 +1,6 @@
 use crate::ast::{
     BinaryOp, BinaryOpType, Expr, Literal, LogicalOp, LogicalOpType, Stmt, UnaryOp, UnaryOpType,
+    Variable,
 };
 use std::{
     cell::RefCell,
@@ -122,8 +123,8 @@ impl Callable for Primitive {
 #[derive(Clone)]
 pub struct Function {
     name: String,
-    parameters: Vec<String>,
-    body: Stmt,
+    parameters: Vec<Variable>,
+    body: Vec<Stmt>,
     closure: Rc<RefCell<Environment>>,
 }
 
@@ -147,16 +148,12 @@ impl Callable for Function {
         self.parameters
             .iter()
             .zip(arguments.iter())
-            .for_each(|(param, arg)| environment.define(param.clone(), arg.clone()));
+            .for_each(|(param, arg)| environment.define(param.name.clone(), arg.clone()));
 
-        if let Stmt::Block(statements) = &self.body {
-            match interpreter.execute_block(statements, environment) {
-                Err(InterpreterError::Return(val)) => Ok(val),
-                Err(err) => Err(err),
-                _ => Ok(Value::Nil),
-            }
-        } else {
-            Ok(Value::Nil)
+        match interpreter.execute_block(&self.body, environment) {
+            Err(InterpreterError::Return(val)) => Ok(val),
+            Err(err) => Err(err),
+            _ => Ok(Value::Nil),
         }
     }
 }
@@ -210,24 +207,35 @@ impl Environment {
     }
 
     fn get(&self, name: &String) -> Option<Value> {
-        match self.values.get(name) {
-            Some(val) => Some(val.clone()),
-            None => match &self.enclosing {
-                Some(enclosing) => enclosing.borrow().get(name),
-                None => None,
-            },
+        self.values.get(name).cloned()
+    }
+
+    fn get_at(&self, dist: usize, name: &String) -> Option<Value> {
+        if dist == 0 {
+            return self.get(name);
+        }
+        match &self.enclosing {
+            Some(enclosing) => enclosing.borrow().get_at(dist - 1, name),
+            None => panic!("Unexpected error caused by resolver. Variable was resolved too deep."),
         }
     }
 
     fn assign(&mut self, name: String, val: Value) -> Result<(), ()> {
-        if let Entry::Occupied(mut e) = self.values.entry(name.clone()) {
+        if let Entry::Occupied(mut e) = self.values.entry(name) {
             e.insert(val);
             Ok(())
         } else {
-            match &self.enclosing {
-                Some(enclosing) => enclosing.borrow_mut().assign(name, val),
-                None => Err(()),
-            }
+            Err(())
+        }
+    }
+
+    fn assign_at(&mut self, dist: usize, name: String, val: Value) -> Result<(), ()> {
+        if dist == 0 {
+            return self.assign(name, val);
+        }
+        match &self.enclosing {
+            Some(enclosing) => enclosing.borrow_mut().assign_at(dist - 1, name, val),
+            None => panic!("Unexpected error caused by resolver. Variable was resolved too deep."),
         }
     }
 }
@@ -238,6 +246,7 @@ pub struct Interpreter {
     #[allow(dead_code)]
     globals: Rc<RefCell<Environment>>,
     out: Option<Vec<u8>>,
+    locals: HashMap<Variable, usize>,
 }
 
 impl Interpreter {
@@ -264,6 +273,7 @@ impl Interpreter {
             environment: global_env.clone(),
             globals: global_env,
             out,
+            locals: HashMap::new(),
         }
     }
 
@@ -315,36 +325,51 @@ impl Interpreter {
             Expr::Unary { op, rhs } => self.unary(op, rhs),
             Expr::Binary { op, lhs, rhs } => self.binary(op, lhs, rhs),
             Expr::Grouping(expr) => self.expression(expr),
-            Expr::Variable { name, offset } => match self.environment.borrow().get(name) {
-                Some(name) => Ok(name),
-                None => Err(InterpreterError::UnknownVariable(
-                    name.clone(),
-                    self.error_msg(*offset),
-                )),
-            },
-            Expr::Assign {
-                name,
-                value,
-                offset,
-            } => {
-                let value = self.evaluate(value)?;
-                match self
-                    .environment
-                    .borrow_mut()
-                    .assign(name.clone(), value.clone())
-                {
-                    Ok(..) => Ok(value),
-                    Err(..) => Err(InterpreterError::UnknownVariable(
-                        name.clone(),
-                        self.error_msg(*offset),
-                    )),
-                }
-            }
+            Expr::Variable(var) => self.lookup_variable(var),
+            Expr::Assign { var, value } => self.assign_variable(var, value),
             Expr::Call {
                 callee,
                 paren,
                 arguments,
             } => self.call(callee, *paren, arguments),
+        }
+    }
+
+    fn assign_variable(&mut self, var: &Variable, value: &Expr) -> Result<Value, InterpreterError> {
+        let value = self.evaluate(value)?;
+        let res = match self.locals.get(var) {
+            Some(dist) => {
+                self.environment
+                    .borrow_mut()
+                    .assign_at(*dist, var.name.clone(), value.clone())
+            }
+            None => self
+                .globals
+                .borrow_mut()
+                .assign(var.name.clone(), value.clone()),
+        };
+
+        match res {
+            Ok(..) => Ok(value),
+            Err(..) => Err(InterpreterError::UnknownVariable(
+                var.name.clone(),
+                self.error_msg(var.offset),
+            )),
+        }
+    }
+
+    fn lookup_variable(&self, var: &Variable) -> Result<Value, InterpreterError> {
+        let res = match self.locals.get(var) {
+            Some(dist) => self.environment.borrow().get_at(*dist, &var.name),
+            None => self.globals.borrow().get(&var.name),
+        };
+
+        match res {
+            Some(val) => Ok(val),
+            None => Err(InterpreterError::UnknownVariable(
+                var.name.clone(),
+                self.error_msg(var.offset),
+            )),
         }
     }
 
@@ -530,13 +555,13 @@ impl Interpreter {
                     None => println!("{}", val),
                 }
             }
-            Stmt::Var { name, initializer } => {
+            Stmt::Var { var, initializer } => {
                 // TODO Remove implicit variable initialization?
                 let mut val = Value::Nil;
                 if let Some(expr) = initializer {
                     val = self.evaluate(expr)?;
                 }
-                self.environment.borrow_mut().define(name.clone(), val);
+                self.environment.borrow_mut().define(var.name.clone(), val);
             }
             Stmt::Block(statements) => self.execute_block(
                 statements,
@@ -549,19 +574,19 @@ impl Interpreter {
             } => self.execute_if(condition, then_branch, else_branch)?,
             Stmt::While { condition, body } => self.execute_while(condition, body)?,
             Stmt::Function {
-                name,
+                var,
                 parameters,
                 body,
             } => self.environment.borrow_mut().define(
-                name.to_owned(),
+                var.name.to_owned(),
                 Value::Function(Function {
-                    name: name.to_owned(),
+                    name: var.name.to_owned(),
                     parameters: parameters.to_vec(),
-                    body: *body.clone(),
+                    body: body.to_vec(),
                     closure: self.environment.clone(),
                 }),
             ),
-            Stmt::Return(expr) => self.execute_return(expr)?,
+            Stmt::Return { expr, offset: _ } => self.execute_return(expr)?,
         }
 
         Ok(())
@@ -579,6 +604,10 @@ impl Interpreter {
         }
 
         Ok(())
+    }
+
+    pub fn resolve(&mut self, var: &Variable, depth: usize) {
+        self.locals.insert(var.clone(), depth);
     }
 }
 
@@ -608,16 +637,16 @@ fn is_equal(a: &Value, b: &Value) -> bool {
 mod tests {
     use std::rc::Rc;
 
-    use crate::{parser::Parser, scanner::scan_tokens};
+    use crate::{parser::parse_statements, resolver::resolve_variables, scanner::scan_tokens};
 
     use super::Interpreter;
 
     fn interpret(src: &str) -> String {
         let src = Rc::new(src.to_owned());
         let tokens = scan_tokens(&src).unwrap();
-        let mut parser = Parser::new(&src, tokens);
-        let statements = parser.parse().unwrap();
+        let statements = parse_statements(&src, tokens).unwrap();
         let mut interpreter = Interpreter::new_no_stdout();
+        resolve_variables(&src, &mut interpreter, &statements).unwrap();
         interpreter.interpret(src.clone(), statements).unwrap();
         match interpreter.output() {
             Some(str) => str,

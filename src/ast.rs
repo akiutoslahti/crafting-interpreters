@@ -18,14 +18,10 @@ pub enum Expr {
         rhs: Box<Expr>,
     },
     Grouping(Box<Expr>),
-    Variable {
-        name: String,
-        offset: usize,
-    },
+    Variable(Variable),
     Assign {
-        name: String,
+        var: Variable,
         value: Box<Expr>,
-        offset: usize,
     },
     Call {
         callee: Box<Expr>,
@@ -42,12 +38,8 @@ impl Debug for Expr {
             Expr::Unary { op, rhs } => write!(f, "({:?} {:?})", op.optype, rhs),
             Expr::Binary { op, lhs, rhs } => write!(f, "({:?} {:?} {:?})", op.optype, lhs, rhs),
             Expr::Grouping(expr) => write!(f, "(group {:?})", expr),
-            Expr::Variable { name, offset: _ } => write!(f, "{}", name),
-            Expr::Assign {
-                name,
-                value,
-                offset: _,
-            } => write!(f, "{} = {:?}", name, value),
+            Expr::Variable(var) => write!(f, "{}", var.name),
+            Expr::Assign { var, value } => write!(f, "{} = {:?}", var.name, value),
             Expr::Call {
                 callee,
                 paren: _,
@@ -175,6 +167,12 @@ impl BinaryOp {
     }
 }
 
+#[derive(Debug, Clone, Eq, Hash, PartialEq)]
+pub struct Variable {
+    pub name: String,
+    pub offset: usize,
+}
+
 #[derive(Clone)]
 pub enum Stmt {
     Expression(Expr),
@@ -185,7 +183,7 @@ pub enum Stmt {
     },
     Print(Expr),
     Var {
-        name: String,
+        var: Variable,
         initializer: Option<Expr>,
     },
     Block(Vec<Stmt>),
@@ -194,11 +192,14 @@ pub enum Stmt {
         body: Box<Stmt>,
     },
     Function {
-        name: String,
-        parameters: Vec<String>,
-        body: Box<Stmt>,
+        var: Variable,
+        parameters: Vec<Variable>,
+        body: Vec<Stmt>,
     },
-    Return(Option<Expr>),
+    Return {
+        expr: Option<Expr>,
+        offset: usize,
+    },
 }
 
 impl Debug for Stmt {
@@ -215,18 +216,18 @@ impl Debug for Stmt {
                 condition, then_branch, else_branch
             ),
             Stmt::Print(expr) => write!(f, "print {:?}", expr),
-            Stmt::Var { name, initializer } => match initializer {
-                Some(expr) => write!(f, "var {} = {:?}", name, expr),
-                None => write!(f, "var {}", name),
+            Stmt::Var { var, initializer } => match initializer {
+                Some(expr) => write!(f, "var {} = {:?}", var.name, expr),
+                None => write!(f, "var {}", var.name),
             },
             Stmt::Block(statements) => write!(f, "Block {:#?}", statements),
             Stmt::While { condition, body } => write!(f, "while {:?} {:#?}", condition, body),
             Stmt::Function {
-                name,
+                var,
                 parameters,
                 body,
-            } => write!(f, "{}({:?}) {:#?}", name, parameters, body),
-            Stmt::Return(expr) => match expr {
+            } => write!(f, "{}({:?}) {:#?}", var.name, parameters, body),
+            Stmt::Return { expr, offset: _ } => match expr {
                 Some(expr) => write!(f, "return {:?}", expr),
                 None => write!(f, "return"),
             },

@@ -1,4 +1,7 @@
-use crate::{interpreter::Interpreter, parser::Parser, scanner::scan_tokens};
+use crate::{
+    interpreter::Interpreter, parser::parse_statements, resolver::resolve_variables,
+    scanner::scan_tokens,
+};
 use std::{
     fs,
     io::{self, Write},
@@ -10,12 +13,16 @@ fn run(source: Rc<String>, interpreter: &mut Interpreter) {
     match scan_tokens(&source) {
         Ok(tokens) => {
             // println!("Tokens {:#?}", tokens);
-            let mut parser = Parser::new(&source, tokens);
-            match parser.parse() {
+            match parse_statements(&source, tokens) {
                 Ok(statements) => {
                     // println!("Statements {:#?}", statements);
-                    if let Err(err) = interpreter.interpret(source.clone(), statements) {
-                        eprintln!("{}", err);
+                    match resolve_variables(&source, interpreter, &statements) {
+                        Ok(_) => {
+                            if let Err(err) = interpreter.interpret(source.clone(), statements) {
+                                eprintln!("{}", err);
+                            }
+                        }
+                        Err(errors) => errors.iter().for_each(|e| eprintln!("{}", e)),
                     }
                 }
                 Err(errors) => errors.iter().for_each(|e| eprintln!("{}", e)),
