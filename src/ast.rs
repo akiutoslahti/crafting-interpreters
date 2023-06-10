@@ -175,31 +175,6 @@ impl BinaryOp {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::ast::BinaryOp;
-    use crate::ast::BinaryOpType;
-    use crate::ast::Expr;
-    use crate::ast::Literal;
-    use crate::ast::UnaryOp;
-    use crate::ast::UnaryOpType;
-
-    #[test]
-    fn check_astprinter_example() {
-        let expr = Expr::Binary {
-            op: BinaryOp::new(BinaryOpType::Mul, 0),
-            lhs: Box::new(Expr::Unary {
-                op: UnaryOp::new(UnaryOpType::Negate, 0),
-                rhs: Box::new(Expr::Literal(Literal::Number(123.0))),
-            }),
-            rhs: Box::new(Expr::Grouping(Box::new(Expr::Literal(Literal::Number(
-                45.67,
-            ))))),
-        };
-        assert_eq!(format!("{:?}", expr), "(* (- 123) (group 45.67))");
-    }
-}
-
 #[derive(Clone)]
 pub enum Stmt {
     Expression(Expr),
@@ -256,5 +231,30 @@ impl Debug for Stmt {
                 None => write!(f, "return"),
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ast::BinaryOp;
+    use crate::ast::BinaryOpType;
+    use crate::ast::Expr;
+    use crate::ast::Literal;
+    use crate::ast::UnaryOp;
+    use crate::ast::UnaryOpType;
+
+    #[test]
+    fn test_astprinter_example() {
+        let expr = Expr::Binary {
+            op: BinaryOp::new(BinaryOpType::Mul, 0),
+            lhs: Box::new(Expr::Unary {
+                op: UnaryOp::new(UnaryOpType::Negate, 0),
+                rhs: Box::new(Expr::Literal(Literal::Number(123.0))),
+            }),
+            rhs: Box::new(Expr::Grouping(Box::new(Expr::Literal(Literal::Number(
+                45.67,
+            ))))),
+        };
+        assert_eq!(format!("{:?}", expr), "(* (- 123) (group 45.67))");
     }
 }

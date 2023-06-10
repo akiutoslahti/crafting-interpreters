@@ -5,7 +5,10 @@ use crate::{
     scanner::{LiteralType, Token, TokenType},
 };
 use lazy_static::lazy_static;
-use std::{collections::HashMap, fmt::Display};
+use std::{
+    collections::HashMap,
+    fmt::{Debug, Display},
+};
 
 lazy_static! {
     static ref BINARYOPS: HashMap<TokenType, BinaryOpType> = {
@@ -36,7 +39,7 @@ lazy_static! {
     };
 }
 
-#[allow(clippy::enum_variant_names)]
+#[derive(Debug)]
 pub enum ParsingError {
     MissingExpression(Token, String),
     UnmetExpectation(Token, TokenType, String),

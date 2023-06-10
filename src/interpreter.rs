@@ -6,10 +6,12 @@ use std::{
     collections::{hash_map::Entry, HashMap},
     f64::EPSILON,
     fmt::{Debug, Display},
+    io::Write,
     rc::Rc,
     time::{SystemTime, SystemTimeError},
 };
 
+#[derive(Debug)]
 pub enum InterpreterError {
     InvalidUnaryOperand(UnaryOpType, Value, String),
     InvalidBinaryOperands(BinaryOpType, Value, Value, String),
@@ -159,7 +161,7 @@ impl Callable for Function {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Value {
     Number(f64),
     String(String),
@@ -173,7 +175,7 @@ impl Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Value::Number(n) => write!(f, "{}", n),
-            Value::String(s) => write!(f, "\"{}\"", s),
+            Value::String(s) => write!(f, "{}", s),
             Value::Bool(true) => write!(f, "true"),
             Value::Bool(false) => write!(f, "false"),
             Value::Nil => write!(f, "nil"),
@@ -235,10 +237,11 @@ pub struct Interpreter {
     environment: Rc<RefCell<Environment>>,
     #[allow(dead_code)]
     globals: Rc<RefCell<Environment>>,
+    out: Option<Vec<u8>>,
 }
 
 impl Interpreter {
-    pub fn new() -> Self {
+    fn new_local(out: Option<Vec<u8>>) -> Self {
         let global_env = Rc::new(RefCell::new(Environment::new()));
 
         global_env.borrow_mut().define(
@@ -260,6 +263,27 @@ impl Interpreter {
             source: Rc::new("".to_string()),
             environment: global_env.clone(),
             globals: global_env,
+            out,
+        }
+    }
+
+    pub fn new() -> Self {
+        Self::new_local(None)
+    }
+
+    #[allow(dead_code)]
+    pub fn new_no_stdout() -> Self {
+        Self::new_local(Some(Vec::<u8>::new()))
+    }
+
+    #[allow(dead_code)]
+    fn output(&self) -> Option<String> {
+        match &self.out {
+            Some(vec) => match String::from_utf8(vec.clone()) {
+                Ok(str) => Some(str),
+                Err(err) => panic!("Couldn't convert output to String: {}", err),
+            },
+            _ => None,
         }
     }
 
@@ -497,7 +521,14 @@ impl Interpreter {
             }
             Stmt::Print(expr) => {
                 let val = self.evaluate(expr)?;
-                println!("{}", val);
+                match &mut self.out {
+                    Some(vec) => {
+                        if let Err(err) = writeln!(vec, "{}", val) {
+                            panic!("Couldn't write to output buffer: {}", err);
+                        }
+                    }
+                    None => println!("{}", val),
+                }
             }
             Stmt::Var { name, initializer } => {
                 // TODO Remove implicit variable initialization?
@@ -570,5 +601,291 @@ fn is_equal(a: &Value, b: &Value) -> bool {
         (Value::String(a), Value::String(b)) => a == b,
         (Value::Nil, Value::Nil) => true,
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+
+    use crate::{parser::Parser, scanner::scan_tokens};
+
+    use super::Interpreter;
+
+    fn interpret(src: &str) -> String {
+        let src = Rc::new(src.to_owned());
+        let tokens = scan_tokens(&src).unwrap();
+        let mut parser = Parser::new(&src, tokens);
+        let statements = parser.parse().unwrap();
+        let mut interpreter = Interpreter::new_no_stdout();
+        interpreter.interpret(src.clone(), statements).unwrap();
+        match interpreter.output() {
+            Some(str) => str,
+            None => panic!("Couldn't get output from interpreter"),
+        }
+    }
+
+    fn assert_output_eq(src: &str, expectation: &str) {
+        assert_eq!(interpret(src), expectation);
+    }
+
+    #[test]
+    fn test_while_loop() {
+        assert_output_eq(
+            "\
+            var i = 0;\n\
+            while (i < 3) {\n\
+                print i;\n\
+                i = i + 1;\n\
+            }\n\
+            ",
+            "0\n1\n2\n",
+        );
+    }
+
+    #[test]
+    fn test_for_loop() {
+        assert_output_eq(
+            "\
+            for (var i = 0; i < 3; i = i + 1) print i;\n\
+            ",
+            "0\n1\n2\n",
+        );
+    }
+
+    #[test]
+    fn test_if1() {
+        assert_output_eq(
+            "\
+            fun a(b) {\n\
+                if (b != 0) return true;\n\
+                return false;\n\
+            }\n\
+            print a(0);\n\
+            ",
+            "false\n",
+        );
+    }
+
+    #[test]
+    fn test_if2() {
+        assert_output_eq(
+            "\
+            fun a(b) {\n\
+                if (b != 0) return true;\n\
+                return false;\n\
+            }\n\
+            print a(1);\n\
+            ",
+            "true\n",
+        );
+    }
+
+    #[test]
+    fn test_if_else1() {
+        assert_output_eq(
+            "\
+            fun a(b) {\n\
+                if (b != 0) return true;\n\
+                else return false;\n\
+            }\n\
+            print a(0);\n\
+            ",
+            "false\n",
+        );
+    }
+
+    #[test]
+    fn test_if_else2() {
+        assert_output_eq(
+            "\
+            fun a(b) {\n\
+                if (b != 1) return true;\n\
+                else return false;\n\
+            }\n\
+            print a(0);\n\
+            ",
+            "true\n",
+        );
+    }
+
+    #[test]
+    fn test_global_var() {
+        assert_output_eq(
+            "\
+            var asd = \"asd\";\n\
+            fun a() { print asd; }\n\
+            a();\n\
+            ",
+            "asd\n",
+        );
+    }
+
+    #[test]
+    fn test_shadowing() {
+        assert_output_eq(
+            "\
+            var asd = \"asd\";\n\
+            fun a() {\n\
+                var asd = \"das\";\n\
+                print asd;\n\
+            }\n\
+            a();\n\
+            ",
+            "das\n",
+        );
+    }
+
+    #[test]
+    fn test_shadowing_nested() {
+        assert_output_eq(
+            "\
+            var a = \"global a\";\n\
+            var b = \"global b\";\n\
+            var c = \"global c\";\n\
+            {\n\
+                var a = \"outer a\";\n\
+                var b = \"outer b\";\n\
+                {\n\
+                    var a = \"inner a\";\n\
+                    print a;\n\
+                    print b;\n\
+                    print c;\n\
+                }\n\
+                print a;\n\
+                print b;\n\
+                print c;\n\
+            }\n\
+            print a;\n\
+            print b;\n\
+            print c;\n\
+            ",
+            "\
+            inner a\n\
+            outer b\n\
+            global c\n\
+            outer a\n\
+            outer b\n\
+            global c\n\
+            global a\n\
+            global b\n\
+            global c\n\
+            ",
+        );
+    }
+
+    #[test]
+    fn test_scope() {
+        assert_output_eq(
+            "\
+            {\n\
+                var a = \"first\";\n\
+                print a;\n\
+            }\n\
+            {\n\
+                var a = \"second\";\n\
+                print a;\n\
+            }",
+            "first\nsecond\n",
+        )
+    }
+
+    #[test]
+    fn test_print() {
+        assert_output_eq(
+            "\
+            fun a() {}\n\
+            print a;\n\
+            print \"foo\";\n\
+            print 1;\n\
+            print true;\n\
+            print false;\n\
+            print nil;\n\
+            ",
+            "<fun a>\nfoo\n1\ntrue\nfalse\nnil\n",
+        );
+    }
+
+    #[test]
+    fn test_implicit_return1() {
+        assert_output_eq(
+            "\
+            fun a() {}\n\
+            print a();\n\
+            ",
+            "nil\n",
+        )
+    }
+
+    #[test]
+    fn test_implicit_return2() {
+        assert_output_eq(
+            "\
+            fun a() { return; }\n\
+            print a();\n\
+            ",
+            "nil\n",
+        )
+    }
+
+    #[test]
+    fn test_return() {
+        assert_output_eq(
+            "\
+            fun a() { return \"foo\"; }\n\
+            print a();\n\
+            ",
+            "foo\n",
+        )
+    }
+
+    #[test]
+    fn test_fib() {
+        assert_output_eq(
+            "\
+            fun fib(n) {\n\
+                if (n < 2) return n;\n\
+                return fib(n - 1) + fib(n - 2);\n\
+            }\n\
+            print fib(20);\
+            ",
+            "6765\n",
+        )
+    }
+
+    #[test]
+    fn test_closure_example() {
+        assert_output_eq(
+            "\
+            fun makeCounter() {\n\
+                var i = 0;\n\
+                fun count() {\n\
+                    i = i + 1;\n\
+                    print i;\n\
+                }\n\
+                return count;\n\
+            }\n\
+            var counter = makeCounter();\n\
+            counter();\n\
+            counter();\
+            ",
+            "1\n2\n",
+        )
+    }
+
+    #[test]
+    fn test_binding_variables() {
+        assert_output_eq(
+            "\
+            var a = \"global\";\n\
+            {\n\
+                fun showA() { print a; }\n\
+                showA();\n\
+                var a = \"block\";\n\
+                showA();\n\
+            }\n\
+            ",
+            "global\nglobal\n",
+        );
     }
 }
