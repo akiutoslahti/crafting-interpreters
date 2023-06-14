@@ -1,5 +1,7 @@
 use std::fmt::Debug;
 
+// TODO Write less insane debug format for AST
+
 #[derive(Clone)]
 pub enum Expr {
     Literal(Literal),
@@ -28,6 +30,16 @@ pub enum Expr {
         paren: usize,
         arguments: Vec<Expr>,
     },
+    Get {
+        object: Box<Expr>,
+        property: Variable,
+    },
+    Set {
+        object: Box<Expr>,
+        property: Variable,
+        value: Box<Expr>,
+    },
+    This(usize),
 }
 
 impl Debug for Expr {
@@ -45,6 +57,13 @@ impl Debug for Expr {
                 paren: _,
                 arguments,
             } => write!(f, "{:?}({:?})", callee, arguments),
+            Expr::Get { object, property } => write!(f, "{:?}.{}", object, property.name),
+            Expr::Set {
+                object,
+                property,
+                value,
+            } => write!(f, "{:?}.{} = {:?}", object, property.name, value),
+            Expr::This(..) => write!(f, "this"),
         }
     }
 }
@@ -200,6 +219,10 @@ pub enum Stmt {
         expr: Option<Expr>,
         offset: usize,
     },
+    Class {
+        var: Variable,
+        methods: Vec<Stmt>,
+    },
 }
 
 impl Debug for Stmt {
@@ -231,6 +254,7 @@ impl Debug for Stmt {
                 Some(expr) => write!(f, "return {:?}", expr),
                 None => write!(f, "return"),
             },
+            Stmt::Class { var, methods } => write!(f, "{} {:#?}", var.name, methods),
         }
     }
 }

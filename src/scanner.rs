@@ -404,3 +404,8 @@ pub fn scan_tokens(source: &str) -> Result<Vec<Token>, Vec<ScanningError>> {
         Ok(scanner.tokens)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    // TODO Add tests for scanning errors
+}

@@ -10,6 +10,8 @@ pub enum ResolutionError {
     DoubleDeclaration(String, String),
     InvalidErrorReturn(String),
     VariableAccessInInitializer(String, String),
+    InitializerReturnWithValue(String),
+    UseThisOutsideClass(String),
 }
 
 impl PartialEq for ResolutionError {
@@ -25,6 +27,12 @@ impl PartialEq for ResolutionError {
             ) | (
                 ResolutionError::VariableAccessInInitializer(..),
                 ResolutionError::VariableAccessInInitializer(..)
+            ) | (
+                ResolutionError::InitializerReturnWithValue(..),
+                ResolutionError::InitializerReturnWithValue(..)
+            ) | (
+                ResolutionError::UseThisOutsideClass(..),
+                ResolutionError::UseThisOutsideClass(..)
             )
         )
     }
@@ -60,6 +68,18 @@ impl Display for ResolutionError {
                 name,
                 pad_msg(msg)
             ),
+            ResolutionError::UseThisOutsideClass(msg) => write!(
+                f,
+                "{} Can't use 'this' outside of a class.\n\n{}",
+                PREFIX,
+                pad_msg(msg)
+            ),
+            ResolutionError::InitializerReturnWithValue(msg) => write!(
+                f,
+                "{} Can't return value from initializer.\n\n{}",
+                PREFIX,
+                pad_msg(msg)
+            ),
         }
     }
 }
@@ -68,6 +88,14 @@ impl Display for ResolutionError {
 pub enum FunctionType {
     None,
     Function,
+    Initializer,
+    Method,
+}
+
+#[derive(Copy, Clone)]
+pub enum ClassType {
+    None,
+    Class,
 }
 
 pub struct Resolver<'a> {
@@ -75,6 +103,7 @@ pub struct Resolver<'a> {
     interpreter: &'a mut Interpreter,
     scopes: Vec<HashMap<String, bool>>,
     current_function: FunctionType,
+    current_class: ClassType,
     errors: Vec<ResolutionError>,
 }
 
@@ -85,6 +114,7 @@ impl<'a> Resolver<'a> {
             interpreter,
             scopes: vec![],
             current_function: FunctionType::None,
+            current_class: ClassType::None,
             errors: vec![],
         }
     }
@@ -163,6 +193,12 @@ impl<'a> Resolver<'a> {
                 FunctionType::None => self
                     .errors
                     .push(ResolutionError::InvalidErrorReturn(self.error_msg(*offset))),
+                FunctionType::Initializer if expr.is_some() => {
+                    self.errors
+                        .push(ResolutionError::InitializerReturnWithValue(
+                            self.error_msg(*offset),
+                        ))
+                }
                 _ => {
                     if let Some(expr) = expr {
                         self.resolve_expression(expr);
@@ -173,6 +209,7 @@ impl<'a> Resolver<'a> {
                 self.resolve_expression(condition);
                 self.resolve_statement(body);
             }
+            Stmt::Class { var, methods } => self.resolve_class_statement(var, methods),
         }
     }
 
@@ -227,6 +264,38 @@ impl<'a> Resolver<'a> {
         }
     }
 
+    fn resolve_class_statement(&mut self, var: &Variable, methods: &[Stmt]) {
+        let enclosing_class = self.current_class;
+        self.current_class = ClassType::Class;
+
+        self.declare(var);
+        self.define(&var.name);
+
+        self.begin_scope();
+        self.scopes
+            .last_mut()
+            .unwrap()
+            .insert("this".to_string(), true);
+        for method in methods {
+            if let Stmt::Function {
+                var,
+                parameters,
+                body,
+            } = method
+            {
+                let mut function_type = FunctionType::Method;
+                if var.name == "init" {
+                    function_type = FunctionType::Initializer;
+                }
+                self.resolve_function_stmt(var, parameters, body, function_type)
+            }
+            // Check error?
+        }
+        self.end_scope();
+
+        self.current_class = enclosing_class;
+    }
+
     fn resolve_expression(&mut self, expr: &Expr) {
         match expr {
             Expr::Variable(var) => self.resolve_variable_expr(var),
@@ -250,6 +319,27 @@ impl<'a> Resolver<'a> {
                 self.resolve_expression(rhs);
             }
             Expr::Unary { op: _, rhs } => self.resolve_expression(rhs),
+            Expr::Get {
+                object,
+                property: _,
+            } => self.resolve_expression(object),
+            Expr::Set {
+                object,
+                property: _,
+                value,
+            } => {
+                self.resolve_expression(object);
+                self.resolve_expression(value);
+            }
+            Expr::This(offset) => match self.current_class {
+                ClassType::Class => self.resolve_local(&Variable {
+                    name: "this".to_string(),
+                    offset: *offset,
+                }),
+                _ => self.errors.push(ResolutionError::UseThisOutsideClass(
+                    self.error_msg(*offset),
+                )),
+            },
         }
     }
 
@@ -372,6 +462,44 @@ mod tests {
                 var a = a + 1;\n\
             }\n",
             ResolutionError::VariableAccessInInitializer(format!(""), format!("")),
+        );
+    }
+
+    #[test]
+    fn test_initializer_value_return() {
+        check_resolution_error(
+            "\
+            class Foo {\n\
+                init() {\n\
+                    return \"asd\";\n\
+                }\n\
+            }\n\
+            ",
+            ResolutionError::InitializerReturnWithValue(format!("")),
+        );
+    }
+
+    #[test]
+    fn test_this_outside_class_method1() {
+        check_resolution_error(
+            "\
+            {\n\
+                print this;\n\
+            }\n\
+            ",
+            ResolutionError::UseThisOutsideClass(format!("")),
+        );
+    }
+
+    #[test]
+    fn test_this_outside_class_method2() {
+        check_resolution_error(
+            "\
+            fun foo() {\n\
+                print this;\n\
+            }\n\
+            ",
+            ResolutionError::UseThisOutsideClass(format!("")),
         );
     }
 }

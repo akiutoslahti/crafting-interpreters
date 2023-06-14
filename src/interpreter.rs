@@ -22,6 +22,8 @@ pub enum InterpreterError {
     InvalidArgumentCount(usize, usize, String),
     SystemTimeError(SystemTimeError),
     NotCallable(Value, String),
+    InvalidPropertyAccess(String),
+    UndefinedProperty(String, String),
 }
 
 impl Display for InterpreterError {
@@ -80,6 +82,19 @@ impl Display for InterpreterError {
                 val,
                 pad_msg(msg)
             ),
+            InterpreterError::InvalidPropertyAccess(msg) => write!(
+                f,
+                "{} Only instances have properties.\n\n{}",
+                PREFIX,
+                pad_msg(msg)
+            ),
+            InterpreterError::UndefinedProperty(property, msg) => write!(
+                f,
+                "{} Undefined property \"{}\".\n\n{}",
+                PREFIX,
+                property,
+                pad_msg(msg)
+            ),
         }
     }
 }
@@ -120,17 +135,43 @@ impl Callable for Primitive {
     }
 }
 
+impl Callable for Rc<RefCell<Primitive>> {
+    fn arity(&self) -> usize {
+        self.borrow().arity()
+    }
+
+    fn call(
+        &self,
+        interpreter: &mut Interpreter,
+        arguments: Vec<Value>,
+    ) -> Result<Value, InterpreterError> {
+        self.borrow().call(interpreter, arguments)
+    }
+}
+
 #[derive(Clone)]
 pub struct Function {
     name: String,
     parameters: Vec<Variable>,
     body: Vec<Stmt>,
     closure: Rc<RefCell<Environment>>,
+    is_initializer: bool,
 }
 
 impl Debug for Function {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<fun {}>", self.name)
+    }
+}
+
+impl Function {
+    fn bind(&self, instance: Rc<RefCell<Instance>>) -> Self {
+        let mut environment = Environment::new_with_enclosing(self.closure.clone());
+        environment.define("this".to_string(), Value::Instance(instance));
+        Self {
+            closure: Rc::new(RefCell::new(environment)),
+            ..self.clone()
+        }
     }
 }
 
@@ -150,11 +191,120 @@ impl Callable for Function {
             .zip(arguments.iter())
             .for_each(|(param, arg)| environment.define(param.name.clone(), arg.clone()));
 
-        match interpreter.execute_block(&self.body, environment) {
-            Err(InterpreterError::Return(val)) => Ok(val),
-            Err(err) => Err(err),
-            _ => Ok(Value::Nil),
+        if self.is_initializer {
+            let this = if let Some(value) = self.closure.borrow().get_at(0, &"this".to_string()) {
+                value
+            } else {
+                panic!("Unexpected error caused by resolver. Couldn't find \"this\" binding when executing class method");
+            };
+
+            match interpreter.execute_block(&self.body, environment) {
+                Err(InterpreterError::Return(..)) => Ok(this),
+                Err(err) => Err(err),
+                _ => Ok(this),
+            }
+        } else {
+            match interpreter.execute_block(&self.body, environment) {
+                Err(InterpreterError::Return(value)) => Ok(value),
+                Err(err) => Err(err),
+                _ => Ok(Value::Nil),
+            }
         }
+    }
+}
+
+impl Callable for Rc<RefCell<Function>> {
+    fn arity(&self) -> usize {
+        self.borrow().arity()
+    }
+
+    fn call(
+        &self,
+        interpreter: &mut Interpreter,
+        arguments: Vec<Value>,
+    ) -> Result<Value, InterpreterError> {
+        self.borrow().call(interpreter, arguments)
+    }
+}
+
+#[derive(Clone)]
+pub struct Class {
+    name: String,
+    methods: HashMap<String, Rc<RefCell<Function>>>,
+}
+
+impl Debug for Class {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<class {}>", self.name)
+    }
+}
+
+impl Callable for Rc<RefCell<Class>> {
+    fn arity(&self) -> usize {
+        if let Some(function) = self.borrow().find_method("this") {
+            return function.borrow().arity();
+        }
+        0
+    }
+
+    fn call(
+        &self,
+        interpreter: &mut Interpreter,
+        arguments: Vec<Value>,
+    ) -> Result<Value, InterpreterError> {
+        let instance = Rc::new(RefCell::new(Instance::new(self.clone())));
+
+        if let Some(function) = self.borrow().find_method("init") {
+            #[allow(unused_must_use)]
+            {
+                function
+                    .borrow()
+                    .bind(instance.clone())
+                    .call(interpreter, arguments);
+            }
+        }
+
+        Ok(Value::Instance(instance))
+    }
+}
+
+impl Class {
+    fn find_method(&self, method: &str) -> Option<Rc<RefCell<Function>>> {
+        self.methods.get(method).cloned()
+    }
+}
+
+#[derive(Clone)]
+pub struct Instance {
+    class: Rc<RefCell<Class>>,
+    fields: HashMap<String, Value>,
+}
+
+impl Instance {
+    pub fn new(class: Rc<RefCell<Class>>) -> Self {
+        Self {
+            class,
+            fields: HashMap::new(),
+        }
+    }
+
+    fn get(&self, instance: Rc<RefCell<Instance>>, name: &str) -> Option<Value> {
+        match self.fields.get(name) {
+            Some(property) => Some(property.clone()),
+            None => self.class.borrow().find_method(name).map(|function| {
+                Value::Function(Rc::new(RefCell::new(function.borrow().bind(instance))))
+            }),
+        }
+    }
+
+    fn set(&mut self, property: String, value: Value) {
+        self.fields.insert(property, value);
+    }
+}
+
+impl Debug for Instance {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<instance {:?}>", self.class.borrow())
     }
 }
 
@@ -164,8 +314,10 @@ pub enum Value {
     String(String),
     Bool(bool),
     Nil,
-    Primitive(Primitive),
-    Function(Function),
+    Primitive(Rc<RefCell<Primitive>>),
+    Function(Rc<RefCell<Function>>),
+    Class(Rc<RefCell<Class>>),
+    Instance(Rc<RefCell<Instance>>),
 }
 
 impl Display for Value {
@@ -176,8 +328,10 @@ impl Display for Value {
             Value::Bool(true) => write!(f, "true"),
             Value::Bool(false) => write!(f, "false"),
             Value::Nil => write!(f, "nil"),
-            Value::Primitive(fun) => write!(f, "{:?}", fun),
-            Value::Function(fun) => write!(f, "{:?}", fun),
+            Value::Primitive(fun) => write!(f, "{:?}", fun.borrow()),
+            Value::Function(fun) => write!(f, "{:?}", fun.borrow()),
+            Value::Class(class) => write!(f, "{:?}", class.borrow()),
+            Value::Instance(instance) => write!(f, "{:?}", instance.borrow()),
         }
     }
 }
@@ -255,7 +409,7 @@ impl Interpreter {
 
         global_env.borrow_mut().define(
             "clock".to_owned(),
-            Value::Primitive(Primitive {
+            Value::Primitive(Rc::new(RefCell::new(Primitive {
                 name: "clock".to_owned(),
                 arity: 0,
                 function: |_, _| {
@@ -265,7 +419,7 @@ impl Interpreter {
                     };
                     Ok(Value::Number(time as f64))
                 },
-            }),
+            }))),
         );
 
         Self {
@@ -332,6 +486,16 @@ impl Interpreter {
                 paren,
                 arguments,
             } => self.call(callee, *paren, arguments),
+            Expr::Get { object, property } => self.get_expr(object, property),
+            Expr::Set {
+                object,
+                property,
+                value,
+            } => self.set_expr(object, property, value),
+            Expr::This(offset) => self.lookup_variable(&Variable {
+                name: "this".to_string(),
+                offset: *offset,
+            }),
         }
     }
 
@@ -398,6 +562,44 @@ impl Interpreter {
                 None => Err(InterpreterError::NotCallable(callee, self.error_msg(paren))),
             },
             Err(err) => Err(err),
+        }
+    }
+
+    fn get_expr(&mut self, object: &Expr, property: &Variable) -> Result<Value, InterpreterError> {
+        let object = self.evaluate(object)?;
+        match object {
+            Value::Instance(instance) => {
+                match instance.borrow().get(instance.clone(), &property.name) {
+                    Some(value) => Ok(value),
+                    None => Err(InterpreterError::UndefinedProperty(
+                        property.name.clone(),
+                        self.error_msg(property.offset),
+                    )),
+                }
+            }
+            _ => Err(InterpreterError::InvalidPropertyAccess(
+                self.error_msg(property.offset),
+            )),
+        }
+    }
+
+    fn set_expr(
+        &mut self,
+        object: &Expr,
+        property: &Variable,
+        value: &Expr,
+    ) -> Result<Value, InterpreterError> {
+        let object = self.evaluate(object)?;
+
+        match object {
+            Value::Instance(instance) => {
+                let value = self.evaluate(value)?;
+                instance
+                    .borrow_mut()
+                    .set(property.name.clone(), value.clone());
+                Ok(value)
+            }
+            _ => todo!(),
         }
     }
 
@@ -578,15 +780,56 @@ impl Interpreter {
                 parameters,
                 body,
             } => self.environment.borrow_mut().define(
-                var.name.to_owned(),
-                Value::Function(Function {
-                    name: var.name.to_owned(),
+                var.name.clone(),
+                Value::Function(Rc::new(RefCell::new(Function {
+                    name: var.name.clone(),
                     parameters: parameters.to_vec(),
                     body: body.to_vec(),
                     closure: self.environment.clone(),
-                }),
+                    is_initializer: false,
+                }))),
             ),
             Stmt::Return { expr, offset: _ } => self.execute_return(expr)?,
+            Stmt::Class { var, methods } => {
+                self.environment
+                    .borrow_mut()
+                    .define(var.name.clone(), Value::Nil);
+
+                let mut class_methods: HashMap<String, Rc<RefCell<Function>>> = HashMap::new();
+                for method in methods {
+                    if let Stmt::Function {
+                        var,
+                        parameters,
+                        body,
+                    } = method
+                    {
+                        class_methods.insert(
+                            var.name.clone(),
+                            Rc::new(RefCell::new(Function {
+                                name: var.name.clone(),
+                                parameters: parameters.to_vec(),
+                                body: body.to_vec(),
+                                closure: self.environment.clone(),
+                                is_initializer: var.name == "init",
+                            })),
+                        );
+                    }
+                    // Check error?
+                }
+
+                if let Err(..) = self.environment.borrow_mut().assign(
+                    var.name.clone(),
+                    Value::Class(Rc::new(RefCell::new(Class {
+                        name: var.name.clone(),
+                        methods: class_methods,
+                    }))),
+                ) {
+                    return Err(InterpreterError::UnknownVariable(
+                        var.name.clone(),
+                        self.error_msg(var.offset),
+                    ));
+                }
+            }
         }
 
         Ok(())
@@ -615,6 +858,7 @@ fn to_callable(val: &Value) -> Option<&dyn Callable> {
     match val {
         Value::Primitive(fun) => Some(fun),
         Value::Function(fun) => Some(fun),
+        Value::Class(class) => Some(class),
         _ => None,
     }
 }
@@ -640,6 +884,8 @@ mod tests {
     use crate::{parser::parse_statements, resolver::resolve_variables, scanner::scan_tokens};
 
     use super::Interpreter;
+
+    // TODO Add tests for interpreter errors
 
     fn interpret(src: &str) -> String {
         let src = Rc::new(src.to_owned());
@@ -916,5 +1162,165 @@ mod tests {
             ",
             "global\nglobal\n",
         );
+    }
+
+    #[test]
+    fn test_class_declaration() {
+        assert_output_eq(
+            "\
+            class A {\n\
+                b() {}\n\
+            }\n\
+            print A;\n\
+            ",
+            "<class A>\n",
+        );
+    }
+
+    #[test]
+    fn test_class_instantiation() {
+        assert_output_eq(
+            "\
+            class A {}\n\
+            var a = A();\n\
+            print a;\n\
+            ",
+            "<instance <class A>>\n",
+        );
+    }
+
+    #[test]
+    fn test_instance_property() {
+        assert_output_eq(
+            "\
+            class A {}\n\
+            var a = A();\n\
+            a.b = \"c\";\n\
+            print a.b;\n\
+            ",
+            "c\n",
+        )
+    }
+
+    #[test]
+    fn test_class_method() {
+        assert_output_eq(
+            "\
+            class Foo {\n\
+                bar() {\n\
+                    print \"baz\";\n\
+                }\n\
+            }\n\
+            Foo().bar();\n\
+            ",
+            "baz\n",
+        );
+    }
+
+    #[test]
+    fn test_this_binding1() {
+        assert_output_eq(
+            "\
+            class Foo {\n\
+                bar() {\n\
+                    print this;\n\
+                }\n\
+            }\n\
+            var method = Foo().bar;\n\
+            method();\n\
+            ",
+            "<instance <class Foo>>\n",
+        )
+    }
+
+    #[test]
+    fn test_this_binding2() {
+        assert_output_eq(
+            "\
+            class Cake {\n\
+                taste() {\n\
+                var adjective = \"delicious\";
+                print \"The \" + this.flavor + \" cake is \" + adjective + \"!\";\n\
+                }\n\
+            }\n\
+            var cake = Cake();\n\
+            cake.flavor = \"German chocolate\";\n\
+            cake.taste();\n\
+            ",
+            "The German chocolate cake is delicious!\n",
+        )
+    }
+
+    #[test]
+    fn test_this_binding3() {
+        assert_output_eq(
+            "\
+            class Foo {\n\
+                getCallback() {\n\
+                    fun localFunction() {\n\
+                        print this;\n\
+                    }\n\
+                    return localFunction;\n\
+                }\n\
+            }\n\
+            var callback = Foo().getCallback();\n\
+            callback();\n\
+            ",
+            "<instance <class Foo>>\n",
+        )
+    }
+
+    #[test]
+    fn test_class_initializer() {
+        assert_output_eq(
+            "\
+            class Foo {\n\
+                init() {\n\
+                    this.bar = \"baz\";\n\
+                }\n\
+                print_bar() {\n\
+                    print this.bar;\n\
+                }
+            }
+            var foo = Foo();\n\
+            foo.print_bar();\n\
+            ",
+            "baz\n",
+        )
+    }
+
+    #[test]
+    fn test_initializer_return_implicit() {
+        assert_output_eq(
+            "\
+            class Foo {\n\
+                init() {\n\
+                    this.bar = \"baz\";\n\
+                }\n\
+                print_bar() {\n\
+                    print this.bar;\n\
+                }\n\
+            }\n\
+            var foo = Foo();\n\
+            print foo.init();\n\
+            ",
+            "<instance <class Foo>>\n",
+        )
+    }
+
+    #[test]
+    fn test_initializer_return_explicit() {
+        assert_output_eq(
+            "\
+            class Foo {\n\
+                init() {\n\
+                return;\n\
+                }\n\
+            }\n\
+            var foo = Foo();\n\
+            print foo.init();\n\
+            ",
+            "<instance <class Foo>>\n",
+        )
     }
 }

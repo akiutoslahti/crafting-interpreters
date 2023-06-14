@@ -161,17 +161,17 @@ impl<'a> Parser<'a> {
         self.previous()
     }
 
-    fn check(&self, tokentype: TokenType) -> bool {
+    fn check(&self, tokentype: TokenType) -> Option<bool> {
         if self.eof() {
-            return false;
+            return None;
         }
 
-        self.peek().tokentype == tokentype
+        Some(self.peek().tokentype == tokentype)
     }
 
     fn match_next(&mut self, tokens: Vec<TokenType>) -> bool {
         for token in tokens {
-            if self.check(token) {
+            if self.check(token).is_some_and(|b| b) {
                 self.advance();
                 return true;
             }
@@ -181,7 +181,7 @@ impl<'a> Parser<'a> {
     }
 
     fn consume(&mut self, tokentype: TokenType) -> Result<&Token, ParsingError> {
-        if self.check(tokentype) {
+        if self.check(tokentype).is_some_and(|b| b) {
             return Ok(self.advance());
         }
 
@@ -231,6 +231,12 @@ impl<'a> Parser<'a> {
             if let Expr::Variable(var) = expr {
                 return Ok(Expr::Assign {
                     var,
+                    value: Box::new(value),
+                });
+            } else if let Expr::Get { object, property } = expr {
+                return Ok(Expr::Set {
+                    object,
+                    property,
                     value: Box::new(value),
                 });
             } else {
@@ -338,7 +344,7 @@ impl<'a> Parser<'a> {
 
     fn finish_call(&mut self, callee: Expr) -> Result<Expr, ParsingError> {
         let mut arguments = vec![];
-        if !self.check(TokenType::RightParen) {
+        if !self.check(TokenType::RightParen).is_some_and(|b| b) {
             loop {
                 if arguments.len() >= 255 {
                     let token = self.peek();
@@ -366,6 +372,23 @@ impl<'a> Parser<'a> {
         loop {
             if self.match_next(vec![TokenType::LeftParen]) {
                 expr = self.finish_call(expr)?;
+            } else if self.match_next(vec![TokenType::Dot]) {
+                let property = self.consume(TokenType::Identifier)?;
+                let name = if let Some(LiteralType::Identifier(name)) = &property.literal {
+                    name.clone()
+                } else {
+                    panic!(
+                        "Mismatch between literal ({:?}) and token type ({:?})",
+                        property.literal, property.tokentype
+                    );
+                };
+                expr = Expr::Get {
+                    object: Box::new(expr),
+                    property: Variable {
+                        name,
+                        offset: property.offset,
+                    },
+                }
             } else {
                 break;
             }
@@ -384,6 +407,10 @@ impl<'a> Parser<'a> {
         ]) {
             let literal = token_to_literal(self.previous())?;
             return Ok(Expr::Literal(literal));
+        }
+
+        if self.match_next(vec![TokenType::This]) {
+            return Ok(Expr::This(self.previous().offset));
         }
 
         if self.match_next(vec![TokenType::Identifier]) {
@@ -434,7 +461,7 @@ impl<'a> Parser<'a> {
     fn block_statement(&mut self) -> Result<Vec<Stmt>, ParsingError> {
         let mut statements: Vec<Stmt> = vec![];
 
-        while !self.check(TokenType::RightBrace) {
+        while !self.check(TokenType::RightBrace).is_some_and(|b| b) {
             statements.push(self.declaration()?);
         }
 
@@ -480,14 +507,14 @@ impl<'a> Parser<'a> {
             Some(self.expression_statement()?)
         };
 
-        let condition = if self.check(TokenType::Semicolon) {
+        let condition = if self.check(TokenType::Semicolon).is_some_and(|b| b) {
             None
         } else {
             Some(self.expression()?)
         };
         self.consume(TokenType::Semicolon)?;
 
-        let increment = if self.check(TokenType::RightParen) {
+        let increment = if self.check(TokenType::RightParen).is_some_and(|b| b) {
             None
         } else {
             Some(self.expression()?)
@@ -532,7 +559,7 @@ impl<'a> Parser<'a> {
         self.consume(TokenType::LeftParen)?;
 
         let mut parameters: Vec<Variable> = vec![];
-        if !self.check(TokenType::RightParen) {
+        if !self.check(TokenType::RightParen).is_some_and(|b| b) {
             loop {
                 if parameters.len() >= 255 {
                     let token = self.peek();
@@ -572,7 +599,7 @@ impl<'a> Parser<'a> {
     }
 
     fn return_statement(&mut self, offset: usize) -> Result<Stmt, ParsingError> {
-        let expr = if !self.check(TokenType::Semicolon) {
+        let expr = if !self.check(TokenType::Semicolon).is_some_and(|b| b) {
             Some(self.expression()?)
         } else {
             None
@@ -581,6 +608,34 @@ impl<'a> Parser<'a> {
         self.consume(TokenType::Semicolon)?;
 
         Ok(Stmt::Return { expr, offset })
+    }
+
+    fn class_statement(&mut self) -> Result<Stmt, ParsingError> {
+        let token = self.consume(TokenType::Identifier)?;
+        let name = if let Some(LiteralType::Identifier(s)) = &token.literal {
+            s.clone()
+        } else {
+            panic!(
+                "Mismatch between literal ({:?}) and token type ({:?})",
+                token.literal, token.tokentype
+            );
+        };
+        let offset = token.offset;
+
+        self.consume(TokenType::LeftBrace)?;
+
+        let mut methods: Vec<Stmt> = vec![];
+
+        while !self.check(TokenType::RightBrace).is_some_and(|b| b) {
+            methods.push(self.function_statement()?)
+        }
+
+        self.consume(TokenType::RightBrace)?;
+
+        Ok(Stmt::Class {
+            var: Variable { name, offset },
+            methods,
+        })
     }
 
     fn statement(&mut self) -> Result<Stmt, ParsingError> {
@@ -604,6 +659,9 @@ impl<'a> Parser<'a> {
         }
         if self.match_next(vec![TokenType::Return]) {
             return self.return_statement(self.previous().offset);
+        }
+        if self.match_next(vec![TokenType::Class]) {
+            return self.class_statement();
         }
 
         self.expression_statement()
@@ -725,4 +783,9 @@ fn token_to_literal(token: &Token) -> Result<Literal, ParsingError> {
         TokenType::Nil => Ok(Literal::Nil),
         _ => panic!("Invalid tokentype ({:?}) for literal", token.tokentype),
     }
+}
+
+#[cfg(test)]
+mod tests {
+    // TODO Add tests for parsing errors
 }
