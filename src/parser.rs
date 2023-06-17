@@ -49,6 +49,30 @@ pub enum ParsingError {
     TooManyParameters(String),
 }
 
+impl PartialEq for ParsingError {
+    fn eq(&self, other: &Self) -> bool {
+        matches!(
+            (self, other),
+            (
+                ParsingError::MissingExpression(..),
+                ParsingError::MissingExpression(..)
+            ) | (
+                ParsingError::UnmetExpectation(..),
+                ParsingError::UnmetExpectation(..)
+            ) | (
+                ParsingError::InvalidAssignmentTarget(..),
+                ParsingError::InvalidAssignmentTarget(..)
+            ) | (
+                ParsingError::TooManyArguments(..),
+                ParsingError::TooManyArguments(..)
+            ) | (
+                ParsingError::TooManyParameters(..),
+                ParsingError::TooManyParameters(..)
+            )
+        )
+    }
+}
+
 impl Display for ParsingError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         const PREFIX: &str = "Parsing error!";
@@ -787,5 +811,70 @@ fn token_to_literal(token: &Token) -> Result<Literal, ParsingError> {
 
 #[cfg(test)]
 mod tests {
-    // TODO Add tests for parsing errors
+    use crate::{
+        ast::Stmt,
+        scanner::{scan_tokens, Token, TokenType},
+    };
+
+    use super::{parse_statements, ParsingError};
+
+    fn parse(src: &str) -> Result<Vec<Stmt>, Vec<ParsingError>> {
+        let tokens = scan_tokens(src).unwrap();
+        parse_statements(src, tokens)
+    }
+
+    fn check_parsing_error(src: &str, kind: ParsingError) {
+        let res = parse(src);
+        assert!(res.is_err());
+        if let Some(errors) = res.err() {
+            assert_eq!(errors.len(), 1);
+            assert_eq!(errors[0], kind);
+        }
+    }
+
+    #[test]
+    fn test_missing_expression() {
+        check_parsing_error(
+            "var foo =",
+            ParsingError::MissingExpression(Token::default(), "".to_string()),
+        )
+    }
+
+    #[test]
+    fn test_unmet_expectation() {
+        check_parsing_error(
+            "var 1 = 2;",
+            ParsingError::UnmetExpectation(Token::default(), TokenType::Eof, "".to_string()),
+        )
+    }
+
+    #[test]
+    fn test_invalid_assignment() {
+        check_parsing_error(
+            "1 = 2;",
+            ParsingError::InvalidAssignmentTarget("".to_string()),
+        )
+    }
+
+    #[test]
+    fn test_too_many_parameters() {
+        let mut params = "param1".to_string();
+        for n in 2..=256 {
+            params = format!("{}, param{}", params, n);
+        }
+        let src = format!("fun foo({}) {{}}", params);
+
+        check_parsing_error(&src, ParsingError::TooManyParameters("".to_string()));
+    }
+
+    #[test]
+    fn test_too_many_arguments() {
+        let mut args = "arg1".to_string();
+        for n in 2..=256 {
+            args = format!("{}, arg{}", args, n);
+        }
+        let src = format!("foo({})", args);
+
+        check_parsing_error(&src, ParsingError::TooManyArguments("".to_string()));
+    }
 }

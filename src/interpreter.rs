@@ -22,8 +22,41 @@ pub enum InterpreterError {
     InvalidArgumentCount(usize, usize, String),
     SystemTimeError(SystemTimeError),
     NotCallable(Value, String),
-    InvalidPropertyAccess(String),
+    InvalidProperty(String),
     UndefinedProperty(String, String),
+}
+
+impl PartialEq for InterpreterError {
+    fn eq(&self, other: &Self) -> bool {
+        matches!(
+            (self, other),
+            (
+                InterpreterError::InvalidUnaryOperand(..),
+                InterpreterError::InvalidUnaryOperand(..)
+            ) | (
+                InterpreterError::InvalidBinaryOperands(..),
+                InterpreterError::InvalidBinaryOperands(..)
+            ) | (
+                InterpreterError::DivisionByZero(..),
+                InterpreterError::DivisionByZero(..)
+            ) | (
+                InterpreterError::UnknownVariable(..),
+                InterpreterError::UnknownVariable(..)
+            ) | (
+                InterpreterError::InvalidArgumentCount(..),
+                InterpreterError::InvalidArgumentCount(..)
+            ) | (
+                InterpreterError::NotCallable(..),
+                InterpreterError::NotCallable(..)
+            ) | (
+                InterpreterError::InvalidProperty(..),
+                InterpreterError::InvalidProperty(..)
+            ) | (
+                InterpreterError::UndefinedProperty(..),
+                InterpreterError::UndefinedProperty(..)
+            )
+        )
+    }
 }
 
 impl Display for InterpreterError {
@@ -82,7 +115,7 @@ impl Display for InterpreterError {
                 val,
                 pad_msg(msg)
             ),
-            InterpreterError::InvalidPropertyAccess(msg) => write!(
+            InterpreterError::InvalidProperty(msg) => write!(
                 f,
                 "{} Only instances have properties.\n\n{}",
                 PREFIX,
@@ -577,7 +610,7 @@ impl Interpreter {
                     )),
                 }
             }
-            _ => Err(InterpreterError::InvalidPropertyAccess(
+            _ => Err(InterpreterError::InvalidProperty(
                 self.error_msg(property.offset),
             )),
         }
@@ -599,7 +632,9 @@ impl Interpreter {
                     .set(property.name.clone(), value.clone());
                 Ok(value)
             }
-            _ => todo!(),
+            _ => Err(InterpreterError::InvalidProperty(
+                self.error_msg(property.offset),
+            )),
         }
     }
 
@@ -881,13 +916,16 @@ fn is_equal(a: &Value, b: &Value) -> bool {
 mod tests {
     use std::rc::Rc;
 
-    use crate::{parser::parse_statements, resolver::resolve_variables, scanner::scan_tokens};
+    use crate::{
+        ast::{BinaryOpType, UnaryOpType},
+        parser::parse_statements,
+        resolver::resolve_variables,
+        scanner::scan_tokens,
+    };
 
-    use super::Interpreter;
+    use super::{Interpreter, InterpreterError, Value};
 
-    // TODO Add tests for interpreter errors
-
-    fn interpret(src: &str) -> String {
+    fn interpreter_output(src: &str) -> String {
         let src = Rc::new(src.to_owned());
         let tokens = scan_tokens(&src).unwrap();
         let statements = parse_statements(&src, tokens).unwrap();
@@ -901,7 +939,24 @@ mod tests {
     }
 
     fn assert_output_eq(src: &str, expectation: &str) {
-        assert_eq!(interpret(src), expectation);
+        assert_eq!(interpreter_output(src), expectation);
+    }
+
+    fn interpret(src: &str) -> Result<(), InterpreterError> {
+        let src = Rc::new(src.to_owned());
+        let tokens = scan_tokens(&src).unwrap();
+        let statements = parse_statements(&src, tokens).unwrap();
+        let mut interpreter = Interpreter::new_no_stdout();
+        resolve_variables(&src, &mut interpreter, &statements).unwrap();
+        interpreter.interpret(src.clone(), statements)
+    }
+
+    fn check_interpreter_error(src: &str, kind: InterpreterError) {
+        let res = interpret(src);
+        assert!(res.is_err());
+        if let Some(error) = res.err() {
+            assert_eq!(error, kind);
+        }
     }
 
     #[test]
@@ -1321,6 +1376,88 @@ mod tests {
             print foo.init();\n\
             ",
             "<instance <class Foo>>\n",
+        )
+    }
+
+    #[test]
+    fn test_invalid_unary_operand() {
+        check_interpreter_error(
+            "var foo = -\"asd\";",
+            InterpreterError::InvalidUnaryOperand(UnaryOpType::Negate, Value::Nil, "".to_string()),
+        )
+    }
+
+    #[test]
+    fn test_invalid_binary_operands() {
+        check_interpreter_error(
+            "var foo = \"asd\" / 12;",
+            InterpreterError::InvalidBinaryOperands(
+                BinaryOpType::Div,
+                Value::Nil,
+                Value::Nil,
+                "".to_string(),
+            ),
+        )
+    }
+
+    #[test]
+    fn test_division_by_zero() {
+        check_interpreter_error(
+            "var foo = 12 / 0;",
+            InterpreterError::DivisionByZero("".to_string()),
+        )
+    }
+
+    #[test]
+    fn test_unknown_variable() {
+        check_interpreter_error(
+            "print foo;",
+            InterpreterError::UnknownVariable("".to_string(), "".to_string()),
+        )
+    }
+
+    #[test]
+    fn test_not_callable() {
+        check_interpreter_error(
+            "\
+            var foo = \"foo\";\n\
+            foo();\n\
+            ",
+            InterpreterError::NotCallable(Value::Nil, "".to_string()),
+        )
+    }
+
+    #[test]
+    fn test_invalid_property_access() {
+        check_interpreter_error(
+            "\
+            var foo = \"foo\";
+            print foo.bar;\n\
+            ",
+            InterpreterError::InvalidProperty("".to_string()),
+        )
+    }
+
+    #[test]
+    fn test_invalid_property_assign() {
+        check_interpreter_error(
+            "\
+        var foo;\n\
+        foo.bar = \"bar\"\n\
+        ;",
+            InterpreterError::InvalidProperty("".to_string()),
+        )
+    }
+
+    #[test]
+    fn test_undefined_property() {
+        check_interpreter_error(
+            "\
+            class Foo {}\n\
+            var foo = Foo();\n\
+            print foo.bar;\n\
+            ",
+            InterpreterError::UndefinedProperty("".to_string(), "".to_string()),
         )
     }
 }

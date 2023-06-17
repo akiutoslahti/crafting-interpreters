@@ -431,7 +431,7 @@ mod tests {
                 var a = \"a\";\n\
                 var a = \"a\";\n\
             }\n",
-            ResolutionError::DoubleDeclaration(format!(""), format!("")),
+            ResolutionError::DoubleDeclaration("".to_string(), "".to_string()),
         );
     }
 
@@ -439,7 +439,7 @@ mod tests {
     fn test_return_outside_function1() {
         check_resolution_error(
             "return \"foo\";\n",
-            ResolutionError::InvalidErrorReturn(format!("")),
+            ResolutionError::InvalidErrorReturn("".to_string()),
         );
     }
 
@@ -450,7 +450,7 @@ mod tests {
             { \n\
                 return \"foo\";\n\
             }\n",
-            ResolutionError::InvalidErrorReturn(format!("")),
+            ResolutionError::InvalidErrorReturn("".to_string()),
         );
     }
 
@@ -461,7 +461,7 @@ mod tests {
             {\n\
                 var a = a + 1;\n\
             }\n",
-            ResolutionError::VariableAccessInInitializer(format!(""), format!("")),
+            ResolutionError::VariableAccessInInitializer("".to_string(), "".to_string()),
         );
     }
 
@@ -475,7 +475,7 @@ mod tests {
                 }\n\
             }\n\
             ",
-            ResolutionError::InitializerReturnWithValue(format!("")),
+            ResolutionError::InitializerReturnWithValue("".to_string()),
         );
     }
 
@@ -487,7 +487,7 @@ mod tests {
                 print this;\n\
             }\n\
             ",
-            ResolutionError::UseThisOutsideClass(format!("")),
+            ResolutionError::UseThisOutsideClass("".to_string()),
         );
     }
 
@@ -499,7 +499,7 @@ mod tests {
                 print this;\n\
             }\n\
             ",
-            ResolutionError::UseThisOutsideClass(format!("")),
+            ResolutionError::UseThisOutsideClass("".to_string()),
         );
     }
 }

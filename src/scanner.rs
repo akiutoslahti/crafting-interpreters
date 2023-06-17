@@ -10,6 +10,21 @@ pub enum ScanningError {
     UnterminatedString(String),
 }
 
+impl PartialEq for ScanningError {
+    fn eq(&self, other: &Self) -> bool {
+        matches!(
+            (self, other),
+            (
+                ScanningError::UnexpectedChar(..),
+                ScanningError::UnexpectedChar(..)
+            ) | (
+                ScanningError::UnterminatedString(..),
+                ScanningError::UnterminatedString(..)
+            )
+        )
+    }
+}
+
 impl Display for ScanningError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         const PREFIX: &str = "Scanning error!";
@@ -122,6 +137,17 @@ pub struct Token {
     pub lexeme: String,
     pub offset: usize,
     pub literal: Option<LiteralType>,
+}
+
+impl Default for Token {
+    fn default() -> Self {
+        Self {
+            tokentype: TokenType::Eof,
+            lexeme: "".to_string(),
+            offset: 0,
+            literal: None,
+        }
+    }
 }
 
 impl Token {
@@ -407,5 +433,31 @@ pub fn scan_tokens(source: &str) -> Result<Vec<Token>, Vec<ScanningError>> {
 
 #[cfg(test)]
 mod tests {
-    // TODO Add tests for scanning errors
+    use super::{scan_tokens, ScanningError, Token};
+
+    fn scan(src: &str) -> Result<Vec<Token>, Vec<ScanningError>> {
+        scan_tokens(src)
+    }
+
+    fn check_scanning_error(src: &str, kind: ScanningError) {
+        let res = scan(src);
+        assert!(res.is_err());
+        if let Some(errors) = res.err() {
+            assert_eq!(errors.len(), 1);
+            assert_eq!(errors[0], kind);
+        }
+    }
+
+    #[test]
+    fn test_unexpected_char() {
+        check_scanning_error("$", ScanningError::UnexpectedChar(' ', "".to_string()))
+    }
+
+    #[test]
+    fn test_unterminated_string() {
+        check_scanning_error(
+            "var a = \"asd",
+            ScanningError::UnterminatedString("".to_string()),
+        )
+    }
 }
