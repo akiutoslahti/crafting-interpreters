@@ -1,8 +1,6 @@
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 
-// TODO Write less insane debug format for AST
-
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Expr {
     Literal(Literal),
     Logical {
@@ -42,33 +40,45 @@ pub enum Expr {
     This(usize),
 }
 
-impl Debug for Expr {
+impl Display for Expr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Expr::Literal(l) => write!(f, "{:?}", l),
-            Expr::Logical { op, lhs, rhs } => write!(f, "({:?} {:?} {:?})", op.optype, lhs, rhs),
-            Expr::Unary { op, rhs } => write!(f, "({:?} {:?})", op.optype, rhs),
-            Expr::Binary { op, lhs, rhs } => write!(f, "({:?} {:?} {:?})", op.optype, lhs, rhs),
-            Expr::Grouping(expr) => write!(f, "(group {:?})", expr),
+            Expr::Literal(l) => write!(f, "{}", l),
+            Expr::Logical { op, lhs, rhs } => write!(f, "({} {} {})", op, lhs, rhs),
+            Expr::Unary { op, rhs } => write!(f, "({} {})", op, rhs),
+            Expr::Binary { op, lhs, rhs } => write!(f, "({} {} {})", op, lhs, rhs),
+            Expr::Grouping(expr) => write!(f, "(group {})", expr),
             Expr::Variable(var) => write!(f, "{}", var.name),
-            Expr::Assign { var, value } => write!(f, "{} = {:?}", var.name, value),
+            Expr::Assign { var, value } => write!(f, "{} = {}", var.name, value),
             Expr::Call {
                 callee,
                 paren: _,
                 arguments,
-            } => write!(f, "{:?}({:?})", callee, arguments),
-            Expr::Get { object, property } => write!(f, "{:?}.{}", object, property.name),
+            } => {
+                let res = write!(f, "{}(", callee);
+                let mut first = true;
+                let res = arguments.iter().fold(res, |res, arg| {
+                    if first {
+                        first = false;
+                        res.and_then(|_| write!(f, "{}", arg))
+                    } else {
+                        res.and_then(|_| write!(f, ", {}", arg))
+                    }
+                });
+                res.and_then(|_| write!(f, ")"))
+            }
+            Expr::Get { object, property } => write!(f, "{}.{}", object, property.name),
             Expr::Set {
                 object,
                 property,
                 value,
-            } => write!(f, "{:?}.{} = {:?}", object, property.name, value),
+            } => write!(f, "{}.{} = {}", object, property.name, value),
             Expr::This(..) => write!(f, "this"),
         }
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Literal {
     Number(f64),
     String(String),
@@ -77,7 +87,7 @@ pub enum Literal {
     Nil,
 }
 
-impl Debug for Literal {
+impl Display for Literal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Literal::Number(n) => write!(f, "{}", n),
@@ -89,22 +99,22 @@ impl Debug for Literal {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum LogicalOpType {
     And,
     Or,
 }
 
-impl Debug for LogicalOpType {
+impl Display for LogicalOpType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            LogicalOpType::And => write!(f, "and"),
-            LogicalOpType::Or => write!(f, "or"),
+            LogicalOpType::And => write!(f, "&&"),
+            LogicalOpType::Or => write!(f, "||"),
         }
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LogicalOp {
     pub optype: LogicalOpType,
     pub offset: usize,
@@ -116,13 +126,19 @@ impl LogicalOp {
     }
 }
 
-#[derive(Copy, Clone)]
+impl Display for LogicalOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.optype)
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
 pub enum UnaryOpType {
     Negate,
     Not,
 }
 
-impl Debug for UnaryOpType {
+impl Display for UnaryOpType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             UnaryOpType::Negate => write!(f, "-"),
@@ -131,7 +147,7 @@ impl Debug for UnaryOpType {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct UnaryOp {
     pub optype: UnaryOpType,
     pub offset: usize,
@@ -143,7 +159,13 @@ impl UnaryOp {
     }
 }
 
-#[derive(Copy, Clone)]
+impl Display for UnaryOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.optype)
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
 pub enum BinaryOpType {
     Equal,
     NotEqual,
@@ -157,7 +179,7 @@ pub enum BinaryOpType {
     Div,
 }
 
-impl Debug for BinaryOpType {
+impl Display for BinaryOpType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             BinaryOpType::Equal => write!(f, "=="),
@@ -174,7 +196,7 @@ impl Debug for BinaryOpType {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct BinaryOp {
     pub optype: BinaryOpType,
     pub offset: usize,
@@ -186,13 +208,19 @@ impl BinaryOp {
     }
 }
 
+impl Display for BinaryOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.optype)
+    }
+}
+
 #[derive(Debug, Clone, Eq, Hash, PartialEq)]
 pub struct Variable {
     pub name: String,
     pub offset: usize,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Stmt {
     Expression(Expr),
     If {
@@ -225,40 +253,6 @@ pub enum Stmt {
     },
 }
 
-impl Debug for Stmt {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Stmt::Expression(expr) => write!(f, "{:?}", expr),
-            Stmt::If {
-                condition,
-                then_branch,
-                else_branch,
-            } => write!(
-                f,
-                "if ({:?}) then {:?} else {:?}",
-                condition, then_branch, else_branch
-            ),
-            Stmt::Print(expr) => write!(f, "print {:?}", expr),
-            Stmt::Var { var, initializer } => match initializer {
-                Some(expr) => write!(f, "var {} = {:?}", var.name, expr),
-                None => write!(f, "var {}", var.name),
-            },
-            Stmt::Block(statements) => write!(f, "Block {:#?}", statements),
-            Stmt::While { condition, body } => write!(f, "while {:?} {:#?}", condition, body),
-            Stmt::Function {
-                var,
-                parameters,
-                body,
-            } => write!(f, "{}({:?}) {:#?}", var.name, parameters, body),
-            Stmt::Return { expr, offset: _ } => match expr {
-                Some(expr) => write!(f, "return {:?}", expr),
-                None => write!(f, "return"),
-            },
-            Stmt::Class { var, methods } => write!(f, "{} {:#?}", var.name, methods),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::ast::BinaryOp;
@@ -267,6 +261,7 @@ mod tests {
     use crate::ast::Literal;
     use crate::ast::UnaryOp;
     use crate::ast::UnaryOpType;
+    use crate::ast::Variable;
 
     #[test]
     fn test_astprinter_example() {
@@ -280,6 +275,22 @@ mod tests {
                 45.67,
             ))))),
         };
-        assert_eq!(format!("{:?}", expr), "(* (- 123) (group 45.67))");
+        assert_eq!(format!("{}", expr), "(* (- 123) (group 45.67))");
+    }
+
+    #[test]
+    fn test_astprinter_call() {
+        let expr = Expr::Call {
+            callee: Box::new(Expr::Variable(Variable {
+                name: "foo".to_string(),
+                offset: 0,
+            })),
+            paren: 0,
+            arguments: vec![
+                Expr::Literal(Literal::Number(1.0)),
+                Expr::Literal(Literal::String("bar".to_string())),
+            ],
+        };
+        assert_eq!(format!("{}", expr), "foo(1, \"bar\")");
     }
 }
