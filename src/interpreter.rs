@@ -23,7 +23,8 @@ pub enum InterpreterError {
     SystemTimeError(SystemTimeError),
     NotCallable(Value, String),
     InvalidProperty(String),
-    UndefinedProperty(String, String),
+    UndefinedClassMember(String, String),
+    SuperclassNotAClass(String),
 }
 
 impl PartialEq for InterpreterError {
@@ -52,8 +53,11 @@ impl PartialEq for InterpreterError {
                 InterpreterError::InvalidProperty(..),
                 InterpreterError::InvalidProperty(..)
             ) | (
-                InterpreterError::UndefinedProperty(..),
-                InterpreterError::UndefinedProperty(..)
+                InterpreterError::UndefinedClassMember(..),
+                InterpreterError::UndefinedClassMember(..)
+            ) | (
+                InterpreterError::SuperclassNotAClass(..),
+                InterpreterError::SuperclassNotAClass(..)
             )
         )
     }
@@ -121,11 +125,17 @@ impl Display for InterpreterError {
                 PREFIX,
                 pad_msg(msg)
             ),
-            InterpreterError::UndefinedProperty(property, msg) => write!(
+            InterpreterError::UndefinedClassMember(property, msg) => write!(
                 f,
                 "{} Undefined property \"{}\".\n\n{}",
                 PREFIX,
                 property,
+                pad_msg(msg)
+            ),
+            InterpreterError::SuperclassNotAClass(msg) => write!(
+                f,
+                "{} Superclass must be a class.\n\n{}",
+                PREFIX,
                 pad_msg(msg)
             ),
         }
@@ -263,6 +273,7 @@ impl Callable for Rc<RefCell<Function>> {
 #[derive(Clone)]
 pub struct Class {
     name: String,
+    superclass: Option<Rc<RefCell<Class>>>,
     methods: HashMap<String, Rc<RefCell<Function>>>,
 }
 
@@ -303,7 +314,13 @@ impl Callable for Rc<RefCell<Class>> {
 
 impl Class {
     fn find_method(&self, method: &str) -> Option<Rc<RefCell<Function>>> {
-        self.methods.get(method).cloned()
+        match self.methods.get(method) {
+            Some(method) => Some(method.clone()),
+            None => match &self.superclass {
+                Some(superclass) => superclass.borrow().find_method(method),
+                None => None,
+            },
+        }
     }
 }
 
@@ -529,6 +546,41 @@ impl Interpreter {
                 name: "this".to_string(),
                 offset: *offset,
             }),
+            Expr::Super { offset, method } => {
+                if let Some(dist) = self.locals.get(&Variable {
+                    name: "super".to_string(),
+                    offset: *offset,
+                }) {
+                    if let Some(Value::Class(superclass)) = self
+                        .environment
+                        .borrow()
+                        .get_at(*dist, &"super".to_string())
+                    {
+                        if let Some(Value::Instance(instance)) = self
+                            .environment
+                            .borrow()
+                            .get_at(dist - 1, &"this".to_string())
+                        {
+                            if let Some(method) = superclass.borrow().find_method(&method.name) {
+                                return Ok(Value::Function(Rc::new(RefCell::new(
+                                    method.borrow().bind(instance),
+                                ))));
+                            } else {
+                                Err(InterpreterError::UndefinedClassMember(
+                                    method.name.clone(),
+                                    self.error_msg(method.offset),
+                                ))
+                            }
+                        } else {
+                            panic!("Unexpected error cause by resolver. No binding for \"this\".")
+                        }
+                    } else {
+                        panic!("Unexpected error caused by resolver. \"super\" binding was resolved too deep.");
+                    }
+                } else {
+                    panic!("Unexpected error cause by resolver. No binding for \"super\".");
+                }
+            }
         }
     }
 
@@ -604,7 +656,7 @@ impl Interpreter {
             Value::Instance(instance) => {
                 match instance.borrow().get(instance.clone(), &property.name) {
                     Some(value) => Ok(value),
-                    None => Err(InterpreterError::UndefinedProperty(
+                    None => Err(InterpreterError::UndefinedClassMember(
                         property.name.clone(),
                         self.error_msg(property.offset),
                     )),
@@ -825,10 +877,36 @@ impl Interpreter {
                 }))),
             ),
             Stmt::Return { expr, offset: _ } => self.execute_return(expr)?,
-            Stmt::Class { var, methods } => {
+            Stmt::Class {
+                var,
+                superclass,
+                methods,
+            } => {
+                let superclass = if let Some(superclass) = superclass {
+                    match self.evaluate(&Expr::Variable(superclass.clone()))? {
+                        Value::Class(class) => Some(class),
+                        _ => {
+                            return Err(InterpreterError::SuperclassNotAClass(
+                                self.error_msg(superclass.offset),
+                            ))
+                        }
+                    }
+                } else {
+                    None
+                };
+
                 self.environment
                     .borrow_mut()
                     .define(var.name.clone(), Value::Nil);
+
+                if let Some(class) = &superclass {
+                    self.environment = Rc::new(RefCell::new(Environment::new_with_enclosing(
+                        self.environment.clone(),
+                    )));
+                    self.environment
+                        .borrow_mut()
+                        .define("super".to_string(), Value::Class(class.clone()));
+                }
 
                 let mut class_methods: HashMap<String, Rc<RefCell<Function>>> = HashMap::new();
                 for method in methods {
@@ -848,14 +926,23 @@ impl Interpreter {
                                 is_initializer: var.name == "init",
                             })),
                         );
+                    } else {
+                        panic!(
+                            "Unexpected error caused by parser. Class methods should be functions."
+                        );
                     }
-                    // Check error?
+                }
+
+                if let Some(..) = &superclass {
+                    let enclosing = self.environment.borrow().enclosing.clone();
+                    self.environment = enclosing.unwrap();
                 }
 
                 if let Err(..) = self.environment.borrow_mut().assign(
                     var.name.clone(),
                     Value::Class(Rc::new(RefCell::new(Class {
                         name: var.name.clone(),
+                        superclass,
                         methods: class_methods,
                     }))),
                 ) {
@@ -1380,6 +1467,67 @@ mod tests {
     }
 
     #[test]
+    fn test_inherited_method() {
+        assert_output_eq(
+            "\
+            class Foo {\n\
+                foo() {\n\
+                    print \"foo\";\n\
+                }\n\
+            }\n\
+            class Bar < Foo {\n\
+                bar() {\n\
+                    print \"bar\";\n\
+                }\n\
+            }\n\
+            class Baz < Bar {\n\
+                baz() {\n\
+                    print \"baz\";\n\
+                }\n\
+            }\n\
+            var baz = Baz();\n\
+            baz.baz();\n\
+            baz.bar();\n\
+            baz.foo();\n\
+            var bar = Bar();\n\
+            bar.bar();\n\
+            bar.foo();\n\
+            var foo = Foo();\n\
+            foo.foo();\n\
+            ",
+            "baz\nbar\nfoo\nbar\nfoo\nfoo\n",
+        )
+    }
+
+    #[test]
+    fn test_super_methods() {
+        assert_output_eq(
+            "\
+            class Foo {\n\
+                method() {\n\
+                    print \"foo\";\n\
+                }\n\
+            }\n\
+            class Bar < Foo {\n\
+                method() {\n\
+                    print \"bar\";\n\
+                }\n\
+                test() {\n\
+                    super.method();\n\
+                }\n\
+            }\n\
+            class Baz < Bar {}\n\
+            Baz().test();\n\
+            Baz().method();\n\
+            Bar().test();\n\
+            Bar().method();\n\
+            Foo().method();\n\
+            ",
+            "foo\nbar\nfoo\nbar\nfoo\n",
+        )
+    }
+
+    #[test]
     fn test_invalid_unary_operand() {
         check_interpreter_error(
             "var foo = -\"asd\";",
@@ -1457,7 +1605,18 @@ mod tests {
             var foo = Foo();\n\
             print foo.bar;\n\
             ",
-            InterpreterError::UndefinedProperty("".to_string(), "".to_string()),
+            InterpreterError::UndefinedClassMember("".to_string(), "".to_string()),
+        )
+    }
+
+    #[test]
+    fn test_superclass_not_a_class() {
+        check_interpreter_error(
+            "\
+            fun foo() {}\n\
+            class Foo < foo {}\n\
+            ",
+            InterpreterError::SuperclassNotAClass("".to_string()),
         )
     }
 }

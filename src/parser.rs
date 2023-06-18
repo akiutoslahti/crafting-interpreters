@@ -433,6 +433,27 @@ impl<'a> Parser<'a> {
             return Ok(Expr::Literal(literal));
         }
 
+        if self.match_next(vec![TokenType::Super]) {
+            let offset = self.previous().offset;
+            self.consume(TokenType::Dot)?;
+            let token = self.consume(TokenType::Identifier)?;
+            let name = if let Some(LiteralType::Identifier(s)) = &token.literal {
+                s.clone()
+            } else {
+                panic!(
+                    "Mismatch between literal ({:?}) and token type ({:?})",
+                    token.literal, token.tokentype
+                );
+            };
+            return Ok(Expr::Super {
+                offset,
+                method: Variable {
+                    name,
+                    offset: token.offset,
+                },
+            });
+        }
+
         if self.match_next(vec![TokenType::This]) {
             return Ok(Expr::This(self.previous().offset));
         }
@@ -644,20 +665,39 @@ impl<'a> Parser<'a> {
                 token.literal, token.tokentype
             );
         };
-        let offset = token.offset;
+        let var = Variable {
+            name,
+            offset: token.offset,
+        };
 
-        self.consume(TokenType::LeftBrace)?;
+        let superclass = if self.match_next(vec![TokenType::Less]) {
+            let token = self.consume(TokenType::Identifier)?;
+            let name = if let Some(LiteralType::Identifier(s)) = &token.literal {
+                s.clone()
+            } else {
+                panic!(
+                    "Mismatch between literal ({:?}) and token type ({:?})",
+                    token.literal, token.tokentype
+                );
+            };
+            Some(Variable {
+                name,
+                offset: token.offset,
+            })
+        } else {
+            None
+        };
 
         let mut methods: Vec<Stmt> = vec![];
-
+        self.consume(TokenType::LeftBrace)?;
         while !self.check(TokenType::RightBrace).is_some_and(|b| b) {
             methods.push(self.function_statement()?)
         }
-
         self.consume(TokenType::RightBrace)?;
 
         Ok(Stmt::Class {
-            var: Variable { name, offset },
+            var,
+            superclass,
             methods,
         })
     }

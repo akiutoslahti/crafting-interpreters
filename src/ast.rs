@@ -38,8 +38,13 @@ pub enum Expr {
         value: Box<Expr>,
     },
     This(usize),
+    Super {
+        offset: usize,
+        method: Variable,
+    },
 }
 
+// TODO Should we drop this? Or make it less insane?
 impl Display for Expr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -48,8 +53,8 @@ impl Display for Expr {
             Expr::Unary { op, rhs } => write!(f, "({} {})", op, rhs),
             Expr::Binary { op, lhs, rhs } => write!(f, "({} {} {})", op, lhs, rhs),
             Expr::Grouping(expr) => write!(f, "(group {})", expr),
-            Expr::Variable(var) => write!(f, "{}", var.name),
-            Expr::Assign { var, value } => write!(f, "{} = {}", var.name, value),
+            Expr::Variable(var) => write!(f, "{}", var),
+            Expr::Assign { var, value } => write!(f, "{} = {}", var, value),
             Expr::Call {
                 callee,
                 paren: _,
@@ -67,13 +72,14 @@ impl Display for Expr {
                 });
                 res.and_then(|_| write!(f, ")"))
             }
-            Expr::Get { object, property } => write!(f, "{}.{}", object, property.name),
+            Expr::Get { object, property } => write!(f, "{}.{}", object, property),
             Expr::Set {
                 object,
                 property,
                 value,
-            } => write!(f, "{}.{} = {}", object, property.name, value),
+            } => write!(f, "{}.{} = {}", object, property, value),
             Expr::This(..) => write!(f, "this"),
+            Expr::Super { offset: _, method } => write!(f, "super.{}", method),
         }
     }
 }
@@ -220,6 +226,12 @@ pub struct Variable {
     pub offset: usize,
 }
 
+impl Display for Variable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum Stmt {
     Expression(Expr),
@@ -249,6 +261,7 @@ pub enum Stmt {
     },
     Class {
         var: Variable,
+        superclass: Option<Variable>,
         methods: Vec<Stmt>,
     },
 }

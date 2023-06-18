@@ -12,6 +12,9 @@ pub enum ResolutionError {
     VariableAccessInInitializer(String, String),
     InitializerReturnWithValue(String),
     UseThisOutsideClass(String),
+    InheritFromSelf(String),
+    SuperOutsideClass(String),
+    SuperWithoutSuperclass(String),
 }
 
 impl PartialEq for ResolutionError {
@@ -33,6 +36,15 @@ impl PartialEq for ResolutionError {
             ) | (
                 ResolutionError::UseThisOutsideClass(..),
                 ResolutionError::UseThisOutsideClass(..)
+            ) | (
+                ResolutionError::InheritFromSelf(..),
+                ResolutionError::InheritFromSelf(..)
+            ) | (
+                ResolutionError::SuperOutsideClass(..),
+                ResolutionError::SuperOutsideClass(..)
+            ) | (
+                ResolutionError::SuperWithoutSuperclass(..),
+                ResolutionError::SuperWithoutSuperclass(..)
             )
         )
     }
@@ -80,6 +92,24 @@ impl Display for ResolutionError {
                 PREFIX,
                 pad_msg(msg)
             ),
+            ResolutionError::InheritFromSelf(msg) => write!(
+                f,
+                "{} A class can't inherit from itself.\n\n{}",
+                PREFIX,
+                pad_msg(msg)
+            ),
+            ResolutionError::SuperOutsideClass(msg) => write!(
+                f,
+                "{} Can't use 'super' outside of a class.\n\n{}",
+                PREFIX,
+                pad_msg(msg)
+            ),
+            ResolutionError::SuperWithoutSuperclass(msg) => write!(
+                f,
+                "{} Can't use 'super' in a class with no superclass.\n\n{}",
+                PREFIX,
+                pad_msg(msg)
+            ),
         }
     }
 }
@@ -96,6 +126,7 @@ pub enum FunctionType {
 pub enum ClassType {
     None,
     Class,
+    SubClass,
 }
 
 pub struct Resolver<'a> {
@@ -209,7 +240,11 @@ impl<'a> Resolver<'a> {
                 self.resolve_expression(condition);
                 self.resolve_statement(body);
             }
-            Stmt::Class { var, methods } => self.resolve_class_statement(var, methods),
+            Stmt::Class {
+                var,
+                superclass,
+                methods,
+            } => self.resolve_class_statement(var, superclass, methods),
         }
     }
 
@@ -264,12 +299,32 @@ impl<'a> Resolver<'a> {
         }
     }
 
-    fn resolve_class_statement(&mut self, var: &Variable, methods: &[Stmt]) {
+    fn resolve_class_statement(
+        &mut self,
+        var: &Variable,
+        superclass: &Option<Variable>,
+        methods: &[Stmt],
+    ) {
         let enclosing_class = self.current_class;
         self.current_class = ClassType::Class;
 
         self.declare(var);
         self.define(&var.name);
+
+        if let Some(superclass) = superclass {
+            self.current_class = ClassType::SubClass;
+            if superclass.name == var.name {
+                self.errors
+                    .push(ResolutionError::InheritFromSelf(self.error_msg(var.offset)))
+            }
+            self.resolve_variable_expr(superclass);
+
+            self.begin_scope();
+            self.scopes
+                .last_mut()
+                .unwrap()
+                .insert("super".to_string(), true);
+        }
 
         self.begin_scope();
         self.scopes
@@ -288,10 +343,15 @@ impl<'a> Resolver<'a> {
                     function_type = FunctionType::Initializer;
                 }
                 self.resolve_function_stmt(var, parameters, body, function_type)
+            } else {
+                panic!("Unexpected error cause by parser. Class methods should be functions.");
             }
-            // Check error?
         }
         self.end_scope();
+
+        if let Some(..) = superclass {
+            self.end_scope();
+        }
 
         self.current_class = enclosing_class;
     }
@@ -337,6 +397,18 @@ impl<'a> Resolver<'a> {
                     offset: *offset,
                 }),
                 _ => self.errors.push(ResolutionError::UseThisOutsideClass(
+                    self.error_msg(*offset),
+                )),
+            },
+            Expr::Super { offset, method: _ } => match self.current_class {
+                ClassType::SubClass => self.resolve_local(&Variable {
+                    name: "super".to_string(),
+                    offset: *offset,
+                }),
+                ClassType::None => self
+                    .errors
+                    .push(ResolutionError::SuperOutsideClass(self.error_msg(*offset))),
+                _ => self.errors.push(ResolutionError::SuperWithoutSuperclass(
                     self.error_msg(*offset),
                 )),
             },
@@ -501,5 +573,35 @@ mod tests {
             ",
             ResolutionError::UseThisOutsideClass("".to_string()),
         );
+    }
+
+    #[test]
+    fn test_inherit_from_self() {
+        check_resolution_error(
+            "class Foo < Foo {}",
+            ResolutionError::InheritFromSelf("".to_string()),
+        );
+    }
+
+    #[test]
+    fn test_super_outside_class() {
+        check_resolution_error(
+            "super.foo();",
+            ResolutionError::SuperOutsideClass("".to_string()),
+        )
+    }
+
+    #[test]
+    fn test_super_without_superclass() {
+        check_resolution_error(
+            "\
+            class Foo {\n\
+                foo(){\n\
+                    super.foo();\n\
+                }\n\
+            }\n\
+            ",
+            ResolutionError::SuperWithoutSuperclass("".to_string()),
+        )
     }
 }
