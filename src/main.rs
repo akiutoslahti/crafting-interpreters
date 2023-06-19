@@ -1,5 +1,5 @@
 use clap::{Parser, ValueEnum};
-use crafting_interpreters::{bytecode::ByteCode, treewalk::TreeWalk};
+use crafting_interpreters::{bytecode::Bytecode, treewalk::TreeWalk};
 
 #[derive(Clone, ValueEnum, Debug)]
 enum Variant {
@@ -14,7 +14,7 @@ enum Variant {
 #[command(long_about = None)]
 struct Args {
     /// Lox variant
-    #[arg(value_enum, long, default_value_t = Variant::TreeWalk)]
+    #[arg(value_enum, long, default_value_t = Variant::Bytecode)]
     variant: Variant,
     /// Print tokens
     #[arg(long, default_value = "false")]
@@ -39,7 +39,7 @@ fn main() {
             }
         }
         Variant::Bytecode => {
-            let bytecode = ByteCode::new(args.print_tokens, args.print_ast);
+            let bytecode = Bytecode::new(args.print_tokens, args.print_ast);
             match pathname {
                 Some(pathname) => bytecode.run_pathname(&pathname),
                 None => bytecode.run_prompt(),
