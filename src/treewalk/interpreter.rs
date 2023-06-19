@@ -447,7 +447,6 @@ impl Environment {
 pub struct Interpreter {
     source: Rc<String>,
     environment: Rc<RefCell<Environment>>,
-    #[allow(dead_code)]
     globals: Rc<RefCell<Environment>>,
     out: Option<Vec<u8>>,
     locals: HashMap<Variable, usize>,
