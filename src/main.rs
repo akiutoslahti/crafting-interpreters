@@ -1,14 +1,5 @@
-use bytecode::ByteCode;
 use clap::{Parser, ValueEnum};
-use treewalk::TreeWalk;
-
-mod ast;
-mod bytecode;
-mod interpreter;
-mod parser;
-mod resolver;
-mod scanner;
-mod treewalk;
+use crafting_interpreters::{bytecode::ByteCode, treewalk::TreeWalk};
 
 #[derive(Clone, ValueEnum, Debug)]
 enum Variant {

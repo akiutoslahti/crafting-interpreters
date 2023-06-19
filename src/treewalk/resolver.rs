@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Display};
 
-use crate::{
+use super::{
     ast::{Expr, Stmt, Variable},
     interpreter::Interpreter,
 };
@@ -474,7 +474,9 @@ pub fn resolve_variables(
 mod tests {
     use std::rc::Rc;
 
-    use crate::{interpreter::Interpreter, parser::parse_statements, scanner::scan_tokens};
+    use crate::treewalk::{
+        interpreter::Interpreter, parser::parse_statements, scanner::scan_tokens,
+    };
 
     use super::{resolve_variables, ResolutionError};
 

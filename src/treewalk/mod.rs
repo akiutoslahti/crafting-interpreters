@@ -1,4 +1,10 @@
-use crate::{
+mod ast;
+mod interpreter;
+mod parser;
+mod resolver;
+mod scanner;
+
+use self::{
     interpreter::Interpreter, parser::parse_statements, resolver::resolve_variables,
     scanner::scan_tokens,
 };

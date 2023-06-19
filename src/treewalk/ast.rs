@@ -268,13 +268,9 @@ pub enum Stmt {
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::BinaryOp;
-    use crate::ast::BinaryOpType;
-    use crate::ast::Expr;
-    use crate::ast::Literal;
-    use crate::ast::UnaryOp;
-    use crate::ast::UnaryOpType;
-    use crate::ast::Variable;
+    use crate::treewalk::ast::{
+        BinaryOp, BinaryOpType, Expr, Literal, UnaryOp, UnaryOpType, Variable,
+    };
 
     #[test]
     fn test_astprinter_example() {

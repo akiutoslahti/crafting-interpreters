@@ -1,4 +1,4 @@
-use crate::{
+use super::{
     ast::{
         BinaryOp, BinaryOpType, Expr, Literal, LogicalOp, LogicalOpType, Stmt, UnaryOp,
         UnaryOpType, Variable,
@@ -851,7 +851,7 @@ fn token_to_literal(token: &Token) -> Result<Literal, ParsingError> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
+    use crate::treewalk::{
         ast::Stmt,
         scanner::{scan_tokens, Token, TokenType},
     };

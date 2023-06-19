@@ -1,4 +1,4 @@
-use crate::ast::{
+use super::ast::{
     BinaryOp, BinaryOpType, Expr, Literal, LogicalOp, LogicalOpType, Stmt, UnaryOp, UnaryOpType,
     Variable,
 };
@@ -1003,7 +1003,7 @@ fn is_equal(a: &Value, b: &Value) -> bool {
 mod tests {
     use std::rc::Rc;
 
-    use crate::{
+    use crate::treewalk::{
         ast::{BinaryOpType, UnaryOpType},
         parser::parse_statements,
         resolver::resolve_variables,
