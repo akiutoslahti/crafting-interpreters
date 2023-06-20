@@ -1,5 +1,3 @@
-use std::fmt::Display;
-
 pub type Value = f64;
 
 // #[derive(Copy, Clone)]

@@ -1,11 +1,16 @@
-use crate::bytecode::{
-    chunk::{Chunk, OpCode},
-    debugger::disassemble_chunk,
-    vm::Vm,
+use std::{
+    fs,
+    io::{self, Write},
+    path::Path,
 };
 
+use crate::bytecode::vm::Vm;
+
 mod chunk;
+mod compiler;
+#[cfg(feature = "debug_trace_execution")]
 mod debugger;
+mod scanner;
 mod value;
 mod vm;
 
@@ -23,34 +28,32 @@ impl Bytecode {
         }
     }
 
+    fn run(&self, src: &str, vm: &mut Vm) {
+        let _ = vm.interpret(src);
+    }
+
     pub fn run_pathname(&self, pathname: &str) {
-        println!("Bytecode compiler for pathname: {}", pathname);
+        let src = fs::read_to_string(Path::new(pathname))
+            .unwrap_or_else(|_| panic!("Couldn't read \"{}\" pathname to UTF-8 string", pathname));
+        self.run(&src, &mut Vm::new());
     }
 
     pub fn run_prompt(&self) {
         let mut vm = Vm::new();
-        let mut chunk = Chunk::new();
-
-        let constant = chunk.add_constant(1.2f64);
-        chunk.write_opcode(OpCode::Constant, 123);
-        chunk.write_chunk(constant, 123);
-
-        let constant = chunk.add_constant(3.4f64);
-        chunk.write_opcode(OpCode::Constant, 123);
-        chunk.write_chunk(constant, 123);
-
-        chunk.write_opcode(OpCode::Add, 123);
-
-        let constant = chunk.add_constant(5.6f64);
-        chunk.write_opcode(OpCode::Constant, 123);
-        chunk.write_chunk(constant, 123);
-
-        chunk.write_opcode(OpCode::Div, 123);
-        chunk.write_opcode(OpCode::Negate, 123);
-
-        chunk.write_opcode(OpCode::Return, 123);
-
-        // disassemble_chunk(&chunk, "test chunk");
-        let _ = vm.interpret(&chunk);
+        loop {
+            print!("> ");
+            #[allow(unused_must_use)]
+            {
+                io::stdout().flush();
+            }
+            let mut line = String::new();
+            io::stdin()
+                .read_line(&mut line)
+                .expect("Couldn't read from stdin");
+            if line == "\n" {
+                break;
+            }
+            self.run(&line, &mut vm);
+        }
     }
 }

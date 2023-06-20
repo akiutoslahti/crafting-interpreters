@@ -3,12 +3,11 @@ use crate::bytecode::debugger::disassemble_instruction;
 
 use super::{
     chunk::{Chunk, OpCode},
+    compiler::compile,
     value::Value,
 };
 
-pub enum InterpretError {
-    RuntimeError,
-}
+pub enum InterpretError {}
 
 pub struct Vm<'a> {
     chunk: Option<&'a Chunk>,
@@ -25,11 +24,9 @@ impl<'a> Vm<'a> {
         }
     }
 
-    pub fn interpret(&mut self, chunk: &'a Chunk) -> Result<(), InterpretError> {
-        self.chunk = Some(chunk);
-        self.ip = 0;
-
-        self.run()
+    pub fn interpret(&mut self, src: &str) -> Result<(), InterpretError> {
+        compile(src);
+        Ok(())
     }
 
     fn run(&mut self) -> Result<(), InterpretError> {
