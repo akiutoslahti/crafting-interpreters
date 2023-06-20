@@ -5,6 +5,11 @@ use super::value::Value;
 pub enum OpCode {
     Return,
     Constant,
+    Negate,
+    Add,
+    Sub,
+    Mul,
+    Div,
 }
 
 impl Display for OpCode {
@@ -12,6 +17,11 @@ impl Display for OpCode {
         match self {
             OpCode::Return => write!(f, "{:16}", "OP_RETURN"),
             OpCode::Constant => write!(f, "{:16}", "OP_CONSTANT"),
+            OpCode::Negate => write!(f, "{:16}", "OP_NEGATE"),
+            OpCode::Add => write!(f, "{:16}", "OP_ADD"),
+            OpCode::Sub => write!(f, "{:16}", "OP_SUB"),
+            OpCode::Mul => write!(f, "{:16}", "OP_MUL"),
+            OpCode::Div => write!(f, "{:16}", "OP_DIV"),
         }
     }
 }
@@ -52,6 +62,11 @@ impl Chunk {
         match opcode {
             OpCode::Return => self.write_chunk(0x00, line),
             OpCode::Constant => self.write_chunk(0x01, line),
+            OpCode::Negate => self.write_chunk(0x02, line),
+            OpCode::Add => self.write_chunk(0x03, line),
+            OpCode::Sub => self.write_chunk(0x04, line),
+            OpCode::Mul => self.write_chunk(0x05, line),
+            OpCode::Div => self.write_chunk(0x06, line),
         }
     }
 
@@ -60,6 +75,11 @@ impl Chunk {
         match opcode {
             0x00 => OpCode::Return,
             0x01 => OpCode::Constant,
+            0x02 => OpCode::Negate,
+            0x03 => OpCode::Add,
+            0x04 => OpCode::Sub,
+            0x05 => OpCode::Mul,
+            0x06 => OpCode::Div,
             _ => panic!("Unkown OpCode ({:x})", opcode),
         }
     }
