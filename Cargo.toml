@@ -10,4 +10,6 @@ clap = { version = "4.3.1", features = ["derive"] }
 lazy_static = "1.4.0"
 
 [features]
-debug_trace_execution = []
+debug = []
+debug_trace_execution = ["debug"]
+debug_print_code = ["debug"]

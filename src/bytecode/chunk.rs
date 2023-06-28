@@ -41,7 +41,8 @@ impl Chunk {
         }
     }
 
-    pub fn is_eof(&self, offset: usize) -> bool {
+    #[cfg(feature = "debug_print_code")]
+    pub fn at_eof(&self, offset: usize) -> bool {
         offset >= self.code.len()
     }
 
@@ -54,6 +55,7 @@ impl Chunk {
         self.code[offset]
     }
 
+    #[cfg(feature = "debug")]
     pub fn get_line(&self, offset: usize) -> usize {
         self.lines[offset]
     }
@@ -84,10 +86,10 @@ impl Chunk {
         }
     }
 
-    pub fn add_constant(&mut self, constant: Value) -> u8 {
-        let idx = self.constants.len();
-        self.constants.push(constant);
-        idx as u8
+    pub fn add_constant(&mut self, value: Value) -> usize {
+        let constant = self.constants.len();
+        self.constants.push(value);
+        constant
     }
 
     pub fn get_constant(&self, offset: usize) -> (u8, Value) {

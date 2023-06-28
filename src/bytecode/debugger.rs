@@ -2,11 +2,12 @@ use crate::bytecode::chunk::OpCode;
 
 use super::chunk::Chunk;
 
+#[cfg(feature = "debug_print_code")]
 pub fn disassemble_chunk(chunk: &Chunk, name: &str) {
     println!("== {} ==", name);
 
     let mut offset: usize = 0;
-    while !chunk.is_eof(offset) {
+    while !chunk.at_eof(offset) {
         offset = disassemble_instruction(chunk, offset);
     }
 }

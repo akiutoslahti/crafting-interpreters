@@ -6,10 +6,12 @@ use std::{
 
 use crate::bytecode::vm::Vm;
 
+#[cfg(feature = "debug")]
+mod debugger;
+
 mod chunk;
 mod compiler;
-#[cfg(feature = "debug_trace_execution")]
-mod debugger;
+mod errors;
 mod scanner;
 mod value;
 mod vm;

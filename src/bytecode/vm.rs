@@ -1,36 +1,56 @@
+use std::{cell::RefCell, rc::Rc};
+
 #[cfg(feature = "debug_trace_execution")]
 use crate::bytecode::debugger::disassemble_instruction;
 
 use super::{
     chunk::{Chunk, OpCode},
-    compiler::compile,
+    compiler::Compiler,
     value::Value,
 };
 
-pub enum InterpretError {}
+pub enum InterpretError {
+    CompileError,
+    RuntimeError,
+}
 
-pub struct Vm<'a> {
-    chunk: Option<&'a Chunk>,
+pub struct Vm {
+    chunk: Rc<RefCell<Chunk>>,
     ip: usize,
     stack: Vec<Value>,
 }
 
-impl<'a> Vm<'a> {
+impl Vm {
     pub fn new() -> Self {
         Self {
-            chunk: None,
+            chunk: Rc::new(RefCell::new(Chunk::new())),
             ip: 0,
             stack: Vec::new(),
         }
     }
 
     pub fn interpret(&mut self, src: &str) -> Result<(), InterpretError> {
-        compile(src);
+        let chunk = Rc::new(RefCell::new(Chunk::new()));
+        let mut compiler = Compiler::new(src, chunk.clone());
+        self.chunk = chunk;
+
+        match compiler.compile() {
+            Ok(_) => {
+                self.ip = 0;
+                if self.run().is_err() {
+                    return Err(InterpretError::RuntimeError);
+                }
+            }
+            Err(_) => {
+                return Err(InterpretError::CompileError);
+            }
+        }
+
         Ok(())
     }
 
-    fn run(&mut self) -> Result<(), InterpretError> {
-        let chunk = self.chunk.unwrap();
+    fn run(&mut self) -> Result<(), ()> {
+        let chunk = self.chunk.borrow_mut();
 
         macro_rules! read_opcode {
             () => {{
@@ -69,7 +89,7 @@ impl<'a> Vm<'a> {
                 print!("          ");
                 self.stack.iter().for_each(|val| print!("[ {} ]", val));
                 println!();
-                disassemble_instruction(chunk, self.ip);
+                disassemble_instruction(&chunk, self.ip);
             }
             let instruction = read_opcode!();
             match instruction {

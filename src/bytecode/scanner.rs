@@ -1,4 +1,6 @@
-#[derive(Debug, PartialEq)]
+use super::errors::LoxError;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TokenType {
     // Single-character tokens
     LeftParen,
@@ -47,8 +49,11 @@ pub enum TokenType {
     While,
 
     Eof,
+
+    None,
 }
 
+#[derive(Clone, Copy)]
 pub struct Token {
     pub tokentype: TokenType,
     pub offset: usize,
@@ -67,10 +72,19 @@ impl Token {
     }
 }
 
-pub struct ScanningError(pub String, pub usize);
+impl Default for Token {
+    fn default() -> Self {
+        Self {
+            tokentype: TokenType::None,
+            offset: 0,
+            length: 0,
+            line: 0,
+        }
+    }
+}
 
 pub struct Scanner {
-    src: Vec<char>,
+    pub src: Vec<char>,
     start: usize,
     current: usize,
     line: usize,
@@ -86,7 +100,7 @@ impl Scanner {
         }
     }
 
-    pub fn scan_token(&mut self) -> Result<Token, ScanningError> {
+    pub fn scan_token(&mut self) -> Result<Token, LoxError> {
         while self.current < self.src.len() {
             match self.peek() {
                 ' ' | '\r' | '\t' => self.current += 1,
@@ -127,10 +141,10 @@ impl Scanner {
         }
 
         match self.advance() {
-            '(' => make_token!(TokenType::RightParen),
-            ')' => make_token!(TokenType::LeftParen),
-            '{' => make_token!(TokenType::RightBrace),
-            '}' => make_token!(TokenType::LeftBrace),
+            '(' => make_token!(TokenType::LeftParen),
+            ')' => make_token!(TokenType::RightParen),
+            '{' => make_token!(TokenType::LeftBrace),
+            '}' => make_token!(TokenType::RightBrace),
             ';' => make_token!(TokenType::Semicolon),
             ',' => make_token!(TokenType::Comma),
             '.' => make_token!(TokenType::Dot),
@@ -167,7 +181,12 @@ impl Scanner {
                 }
 
                 if self.current >= self.src.len() {
-                    Err(ScanningError("Unterminated string.".to_string(), self.line))
+                    Err(LoxError::new(
+                        "Unterminated string.".to_string(),
+                        None,
+                        None,
+                        self.line,
+                    ))
                 } else {
                     self.current += 1;
                     make_token!(TokenType::String)
@@ -198,8 +217,10 @@ impl Scanner {
                 }
                 make_token!(self.identifier_type())
             }
-            _ => Err(ScanningError(
+            _ => Err(LoxError::new(
                 "Unexpected character.".to_string(),
+                Some(self.start),
+                Some(self.current - self.start),
                 self.line,
             )),
         }
